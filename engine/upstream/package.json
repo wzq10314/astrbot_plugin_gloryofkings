@@ -1,0 +1,18 @@
+{
+    "name": "gloryofkings-plugin",
+    "version": "1.0.7",
+    "author": "@Tloml-Starry (上游原作者), cchanlan (本仓库维护者)",
+    "license": "MIT",
+    "type": "module",
+    "scripts": {
+        "fix": "npx prettier --write **/*.js && npx prettier --write *.js"
+    },
+    "dependencies": {
+        "yaml": "^2.2.2",
+        "node-fetch": "^3.3.0"
+    },
+    "imports": {
+        "#components": "./components/index.js",
+        "#utils": "./utils/index.js"
+    }
+}

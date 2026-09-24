@@ -1,0 +1,361 @@
+<style>
+    :root {
+        --c-primary: #e4bea0;
+        --c-bg: #121820;
+        --c-panel: rgba(22, 28, 40, 0.85);
+        --c-panel-light: rgba(255, 255, 255, 0.05);
+        --c-border: rgba(228, 190, 160, 0.2);
+        --c-border-soft: rgba(255, 255, 255, 0.08);
+        --c-text: #eef0f4;
+        --c-text-muted: rgba(238, 240, 244, 0.6);
+        --c-accent: #5fb1eb;
+        
+        --tone-blue: #60a5fa;
+        --tone-cyan: #22d3ee;
+        --tone-green: #34d399;
+        --tone-purple: #c084fc;
+        --tone-emerald: #10b981;
+        --tone-red: #f87171;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+        width: 1000px;
+        padding: 30px;
+        font-family: inherit;
+        color: var(--c-text);
+        background: #000;
+        -webkit-font-smoothing: antialiased;
+    }
+
+    .page {
+        position: relative;
+        border-radius: 24px;
+        overflow: hidden;
+        background: var(--c-bg) url('../img/bgImgV2.png') no-repeat center/cover;
+        border: 1px solid var(--c-border);
+        box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+    }
+
+    .overlay {
+        background: linear-gradient(180deg, rgba(16, 20, 29, 0.88) 0%, rgba(18, 24, 32, 0.96) 100%);
+        backdrop-filter: blur(8px);
+        padding: 40px 45px;
+    }
+
+    .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        border-bottom: 1px solid var(--c-border);
+        padding-bottom: 24px;
+        margin-bottom: 30px;
+    }
+
+    .title-wrap h1 {
+        font-size: 36px;
+        font-weight: 800;
+        color: var(--c-primary);
+        text-shadow: 0 4px 16px rgba(228, 190, 160, 0.3);
+    }
+
+    .header-info {
+        text-align: right;
+        font-size: 13px;
+        color: var(--c-text-muted);
+        line-height: 1.6;
+    }
+
+    .header-info strong {
+        color: var(--c-primary);
+    }
+
+    .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 12px;
+        margin-bottom: 24px;
+    }
+
+    .summary-item {
+        background: var(--c-panel-light);
+        border: 1px solid rgba(255, 255, 255, 0.03);
+        border-radius: 12px;
+        padding: 18px 10px;
+        text-align: center;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .summary-label {
+        font-size: 12px;
+        color: var(--c-text-muted);
+        margin-bottom: 8px;
+        font-weight: bold;
+    }
+
+    .summary-val {
+        font-size: 24px;
+        font-weight: 800;
+    }
+    
+    .tone-blue { color: var(--tone-blue); }
+    .tone-cyan { color: var(--tone-cyan); }
+    .tone-green { color: var(--tone-green); }
+    .tone-purple { color: var(--tone-purple); }
+    .tone-emerald { color: var(--tone-emerald); }
+    .tone-red { color: var(--tone-red); }
+
+    .summary-item::before {
+        content: "";
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 4px;
+    }
+
+    .summary-item:has(.tone-blue)::before { background: var(--tone-blue); }
+    .summary-item:has(.tone-cyan)::before { background: var(--tone-cyan); }
+    .summary-item:has(.tone-green)::before { background: var(--tone-green); }
+    .summary-item:has(.tone-purple)::before { background: var(--tone-purple); }
+    .summary-item:has(.tone-emerald)::before { background: var(--tone-emerald); }
+    .summary-item:has(.tone-red)::before { background: var(--tone-red); }
+
+    .panel {
+        background: var(--c-panel);
+        border: 1px solid var(--c-border-soft);
+        border-radius: 18px;
+        padding: 24px;
+        margin-bottom: 24px;
+    }
+
+    .panel-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+    }
+
+    .panel h2 {
+        font-size: 20px;
+        color: var(--c-primary);
+        display: flex;
+        align-items: center;
+    }
+
+    .panel h2::before {
+        content: '';
+        display: inline-block;
+        width: 4px;
+        height: 18px;
+        background: var(--c-primary);
+        margin-right: 12px;
+        border-radius: 2px;
+    }
+
+    .panel-meta {
+        font-size: 13px;
+        color: var(--c-text-muted);
+    }
+
+    .owners {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+    }
+
+    .owner-card {
+        background: var(--c-panel-light);
+        border: 1px solid rgba(255, 255, 255, 0.03);
+        border-radius: 14px;
+        padding: 16px;
+    }
+
+    .owner-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 14px;
+        border-bottom: 1px solid rgba(255,255,255,0.05);
+        padding-bottom: 12px;
+    }
+
+    .owner-name {
+        font-size: 16px;
+        font-weight: 800;
+        color: var(--c-text);
+        margin-bottom: 6px;
+    }
+
+    .owner-meta {
+        font-size: 12px;
+        color: var(--c-text-muted);
+    }
+
+    .count-row {
+        display: flex;
+        gap: 6px;
+        flex-direction: column;
+        align-items: flex-end;
+    }
+
+    .count-pill {
+        padding: 3px 8px;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: bold;
+        background: rgba(255, 255, 255, 0.06);
+    }
+
+    .count-pill.green { color: var(--tone-green); }
+    .count-pill.red { color: var(--tone-red); }
+    .count-pill.blue { color: var(--tone-blue); }
+
+    .uid-list {
+        display: grid;
+        gap: 8px;
+    }
+
+    .uid-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: rgba(0, 0, 0, 0.2);
+        border: 1px solid transparent;
+    }
+
+    .uid-row.current {
+        border-color: rgba(52, 211, 153, 0.3);
+        background: rgba(52, 211, 153, 0.05);
+    }
+
+    .uid-id {
+        font-size: 14px;
+        font-weight: bold;
+        color: var(--c-text);
+    }
+
+    .uid-sub {
+        font-size: 11px;
+        color: var(--c-text-muted);
+        margin-top: 4px;
+    }
+
+    .uid-row.current .uid-sub,
+    .uid-row.current .uid-id {
+        color: var(--tone-green);
+    }
+
+    .badge {
+        padding: 4px 8px;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: bold;
+    }
+
+    .badge.valid {
+        background: rgba(52, 211, 153, 0.1);
+        color: var(--tone-green);
+    }
+
+    .badge.invalid {
+        background: rgba(248, 113, 113, 0.1);
+        color: var(--tone-red);
+    }
+
+    .badge.none {
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--c-text-muted);
+    }
+
+    .shared-card { grid-column: span 3; }
+    .shared-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+</style>
+
+<body>
+    <div class="page">
+        <div class="overlay">
+            <div class="header">
+                <div class="title-wrap">
+                    <h1>用户鉴权信息统计</h1>
+                </div>
+                <div class="header-info">
+                    <div class="info-time">{{timestamp}} | GloryOfKings-Plugin</div>
+                </div>
+            </div>
+
+            <div class="summary-grid">
+                {{each overviewCards item}}
+                <div class="summary-item tone-bg-{{item.tone}}">
+                    <div class="summary-label">{{item.label}}</div>
+                    <div class="summary-val tone-{{item.tone}}">{{item.value}}</div>
+                </div>
+                {{/each}}
+            </div>
+
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>QQ 归属审计</h2>
+                    {{if omittedOwnerCount > 0}}
+                    <div class="panel-meta">仅展示前 60 个 QQ，已省略 {{omittedOwnerCount}} 个</div>
+                    {{/if}}
+                </div>
+                
+                {{if ownerSections && ownerSections.length}}
+                <div class="owners">
+                    {{each ownerSections owner}}
+                    <div class="owner-card">
+                        <div class="owner-top">
+                            <div>
+                                <div class="owner-name">QQ {{owner.maskedQqId}}</div>
+                                <div class="owner-meta">当前 {{owner.currentMaskedCampId}}</div>
+                            </div>
+                            <div class="count-row">
+                                <div class="count-pill blue">Token {{owner.tokenCount}}</div>
+                                {{if owner.validTokenCount}}<div class="count-pill green">{{owner.validTokenCount}} 有效</div>{{/if}}
+                                {{if owner.invalidTokenCount}}<div class="count-pill red">{{owner.invalidTokenCount}} 失效</div>{{/if}}
+                            </div>
+                        </div>
+
+                        <div class="uid-list">
+                            {{each owner.uidEntries item}}
+                            <div class="uid-row {{item.isCurrent ? 'current' : ''}}">
+                                <div>
+                                    <div class="uid-id">{{item.maskedCampUserId}}</div>
+                                    <div class="uid-sub">{{item.isCurrent ? '当前默认' : '已绑定'}}</div>
+                                </div>
+                                <div class="badge {{item.badgeClass}}">{{item.badgeText}}</div>
+                            </div>
+                            {{/each}}
+                        </div>
+                    </div>
+                    {{/each}}
+                </div>
+                {{else}}
+                <div style="color: var(--c-text-muted);">暂无数据</div>
+                {{/if}}
+            </div>
+
+            {{if unownedAccounts && unownedAccounts.length}}
+            <div class="panel" style="margin-bottom: 0;">
+                <div class="panel-header">
+                    <h2>共享池孤儿账号</h2>
+                </div>
+                <div class="shared-list">
+                    {{each unownedAccounts item}}
+                    <div class="uid-row">
+                        <div>
+                            <div class="uid-id">{{item.maskedCampUserId}}</div>
+                            <div class="uid-sub">{{item.nickname}}</div>
+                        </div>
+                        <div class="badge {{item.statusClass}}">Token</div>
+                    </div>
+                    {{/each}}
+                </div>
+            </div>
+            {{/if}}
+        </div>
+    </div>
+</body>

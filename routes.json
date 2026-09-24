@@ -1,0 +1,953 @@
+[
+  {
+    "file": "astrbotManagement.js",
+    "name": "AstrBot 管理适配",
+    "rules": [
+      {
+        "reg": "^#王者账号管理(?:\\s|$)",
+        "flags": "",
+        "fnc": "accounts",
+        "permission": "master"
+      },
+      {
+        "reg": "^#王者配置(?:\\s|$)",
+        "flags": "",
+        "fnc": "configure",
+        "permission": "master"
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "campImDeploy.js",
+    "name": "王者营地消息运维",
+    "rules": [
+      {
+        "reg": "^#营地消息接入\\s+(\\S+)\\s+(\\S+)$",
+        "flags": "",
+        "fnc": "connect",
+        "permission": "master"
+      },
+      {
+        "reg": "^#营地消息部署$",
+        "flags": "",
+        "fnc": "deploy",
+        "permission": "master"
+      },
+      {
+        "reg": "^#营地消息服务$",
+        "flags": "",
+        "fnc": "status",
+        "permission": "master"
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "watchDeploy.js",
+    "name": "王者营地观战运维",
+    "rules": [
+      {
+        "reg": "^#营地观战接入\\s+(\\S+)\\s+(\\S+)$",
+        "flags": "",
+        "fnc": "connect",
+        "permission": "master"
+      },
+      {
+        "reg": "^#营地观战部署$",
+        "flags": "",
+        "fnc": "deploy",
+        "permission": "master"
+      },
+      {
+        "reg": "^#营地观战服务$",
+        "flags": "",
+        "fnc": "status",
+        "permission": "master"
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "battleExport.js",
+    "name": "王者战绩导出",
+    "rules": [
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(王者)?(导出战绩|战绩导出)\\s*(.*)$",
+        "flags": "",
+        "fnc": "exportCsv",
+        "permission": ""
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "battleReport.js",
+    "name": "王者战绩日报",
+    "rules": [
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(王者|战绩)日报\\s*(.*)$",
+        "flags": "",
+        "fnc": "daily",
+        "permission": ""
+      },
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(王者|战绩)周报\\s*(.*)$",
+        "flags": "",
+        "fnc": "weekly",
+        "permission": ""
+      },
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(王者|战绩)月报\\s*(.*)$",
+        "flags": "",
+        "fnc": "monthly",
+        "permission": ""
+      },
+      {
+        "reg": "^#(开启|关闭)(王者|战绩)?日报推送$",
+        "flags": "",
+        "fnc": "toggleDaily",
+        "permission": ""
+      },
+      {
+        "reg": "^#(开启|关闭)(王者|战绩)?周报推送$",
+        "flags": "",
+        "fnc": "toggleWeekly",
+        "permission": ""
+      },
+      {
+        "reg": "^#(开启|关闭)(王者|战绩)?月报推送$",
+        "flags": "",
+        "fnc": "toggleMonthly",
+        "permission": ""
+      }
+    ],
+    "tasks": [
+      {
+        "name": "王者战绩日报",
+        "cron": "0 47 23 * * *"
+      },
+      {
+        "name": "王者战绩周报",
+        "cron": "0 7 22 * * 0"
+      },
+      {
+        "name": "王者战绩月报",
+        "cron": "0 41 23 28-31 * *"
+      }
+    ]
+  },
+  {
+    "file": "blackList.js",
+    "name": "王者黑名单",
+    "rules": [
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#王者(拉黑|加黑|禁用)\\s*(\\d*)\\s*(?:@[^#]*)?$",
+        "flags": "",
+        "fnc": "add",
+        "permission": "master"
+      },
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#王者(取消拉黑|解除拉黑|解黑|取消禁用)\\s*(\\d*)\\s*(?:@[^#]*)?$",
+        "flags": "",
+        "fnc": "remove",
+        "permission": "master"
+      },
+      {
+        "reg": "^#王者黑名单(列表)?$",
+        "flags": "",
+        "fnc": "list",
+        "permission": "master"
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "cacheManager.js",
+    "name": "王者图片缓存治理",
+    "rules": [
+      {
+        "reg": "^#(王者)?缓存(状态|信息)$",
+        "flags": "",
+        "fnc": "status",
+        "permission": "master"
+      },
+      {
+        "reg": "^#清理(王者)?缓存$",
+        "flags": "",
+        "fnc": "clean",
+        "permission": "master"
+      }
+    ],
+    "tasks": [
+      {
+        "name": "王者图片缓存清理",
+        "cron": "0 12 4 * * *"
+      }
+    ]
+  },
+  {
+    "file": "campFriend.js",
+    "name": "王者营地好友",
+    "rules": [
+      {
+        "reg": "^#营地好友$",
+        "flags": "",
+        "fnc": "list",
+        "permission": ""
+      },
+      {
+        "reg": "^#营地私聊\\s*(\\d+)\\s+([\\s\\S]+)$",
+        "flags": "",
+        "fnc": "chat",
+        "permission": ""
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "campIm.js",
+    "name": "王者营地消息",
+    "rules": [
+      {
+        "reg": "^#营地消息$",
+        "flags": "",
+        "fnc": "status",
+        "permission": ""
+      },
+      {
+        "reg": "^#营地消息(开|开启|收|打开)$",
+        "flags": "",
+        "fnc": "openMine",
+        "permission": ""
+      },
+      {
+        "reg": "^#营地消息(关|关闭|不收|停止)$",
+        "flags": "",
+        "fnc": "closeMine",
+        "permission": ""
+      },
+      {
+        "reg": "^#营地回复\\s*(\\S+)\\s+([\\s\\S]+)$",
+        "flags": "",
+        "fnc": "reply",
+        "permission": ""
+      },
+      {
+        "reg": "^#营地消息(同步|重连)$",
+        "flags": "",
+        "fnc": "resync",
+        "permission": "master"
+      },
+      {
+        "reg": "^[\\s\\S]+$",
+        "flags": "",
+        "fnc": "tryQuote",
+        "permission": ""
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "campRenew.js",
+    "name": "王者营地登录续期",
+    "rules": [
+      {
+        "reg": "^#营地续期$",
+        "flags": "",
+        "fnc": "renewNow",
+        "permission": "master"
+      }
+    ],
+    "tasks": [
+      {
+        "name": "营地登录态保活",
+        "cron": "0 13 5 * * *"
+      }
+    ]
+  },
+  {
+    "file": "dataBackup.js",
+    "name": "王者数据备份",
+    "rules": [
+      {
+        "reg": "^#王者(数据)?备份$",
+        "flags": "",
+        "fnc": "backup",
+        "permission": "master"
+      },
+      {
+        "reg": "^#王者备份列表$",
+        "flags": "",
+        "fnc": "list",
+        "permission": "master"
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "gameRecordPush.js",
+    "name": "王者战绩推送",
+    "rules": [
+      {
+        "reg": "^#(开启|关闭)(王者)?战绩推送$",
+        "flags": "",
+        "fnc": "toggle",
+        "permission": ""
+      },
+      {
+        "reg": "^#(开启|关闭)(王者)?上下线提醒$",
+        "flags": "",
+        "fnc": "toggleOnline",
+        "permission": ""
+      },
+      {
+        "reg": "^#(开启|关闭)(王者)?在线状态(展示)?$",
+        "flags": "",
+        "fnc": "toggleStatus",
+        "permission": ""
+      },
+      {
+        "reg": "^#(王者)?战绩推送(状态|列表)?$",
+        "flags": "",
+        "fnc": "status",
+        "permission": ""
+      },
+      {
+        "reg": "^#清空王者战绩推送$",
+        "flags": "",
+        "fnc": "clearAll",
+        "permission": "master"
+      }
+    ],
+    "tasks": [
+      {
+        "name": "王者战绩推送",
+        "cron": "0 */2 * * * *"
+      }
+    ]
+  },
+  {
+    "file": "groupReport.js",
+    "name": "王者群战绩报告",
+    "rules": [
+      {
+        "reg": "^#(王者|战绩)?群(日|周|月)报$",
+        "flags": "",
+        "fnc": "report",
+        "permission": ""
+      },
+      {
+        "reg": "^#(开启|关闭)(王者|战绩)?群(日|周|月)报推送$",
+        "flags": "",
+        "fnc": "toggle",
+        "permission": "admin"
+      },
+      {
+        "reg": "^#(王者|战绩)?群报(状态|推送状态)$",
+        "flags": "",
+        "fnc": "status",
+        "permission": ""
+      }
+    ],
+    "tasks": [
+      {
+        "name": "王者群日报",
+        "cron": "0 22 23 * * *"
+      },
+      {
+        "name": "王者群周报",
+        "cron": "0 34 21 * * 0"
+      },
+      {
+        "name": "王者群月报",
+        "cron": "0 18 23 28-31 * *"
+      }
+    ]
+  },
+  {
+    "file": "heroDetail.js",
+    "name": "查询王者英雄详情",
+    "rules": [
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(王者)?英雄详情\\s*(.*)$",
+        "flags": "",
+        "fnc": "heroDetail",
+        "permission": ""
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "heroGuide.js",
+    "name": "王者英雄攻略",
+    "rules": [
+      {
+        "reg": "^#(王者)?(英雄攻略|攻略|出装|克制|铭文出装|铭文)\\s*(.*)$",
+        "flags": "",
+        "fnc": "guide",
+        "permission": ""
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "heroMedalWall.js",
+    "name": "王者称号墙",
+    "rules": [
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(称号墙|荣耀称号|我的称号|称号列表)\\s*(.*)$",
+        "flags": "",
+        "fnc": "wall",
+        "permission": ""
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "kingCompare.js",
+    "name": "王者对比",
+    "rules": [
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(王者)?对比\\s*(.*)$",
+        "flags": "",
+        "fnc": "compare",
+        "permission": ""
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "rankTrend.js",
+    "name": "王者段位趋势",
+    "rules": [
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(段位趋势|段位曲线|排位趋势|段位走势)\\s*(.*)$",
+        "flags": "",
+        "fnc": "trend",
+        "permission": ""
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "scoreTrend.js",
+    "name": "王者巅峰趋势",
+    "rules": [
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(巅峰(分)?趋势|上分趋势|分数趋势|巅峰曲线)\\s*(.*)$",
+        "flags": "",
+        "fnc": "trend",
+        "permission": ""
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "shareBind.js",
+    "name": "王者营地ID共享",
+    "rules": [
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(开启|打开)营地(ID)?共享\\s*(?:@[^#]*)?$",
+        "flags": "i",
+        "fnc": "enable",
+        "permission": ""
+      },
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(关闭|取消)营地(ID)?共享\\s*(?:@[^#]*)?$",
+        "flags": "i",
+        "fnc": "disable",
+        "permission": ""
+      },
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#营地(ID)?共享(状态|情况)\\s*(?:@[^#]*)?$",
+        "flags": "i",
+        "fnc": "status",
+        "permission": ""
+      },
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#同步营地(ID)?共享\\s*(?:@[^#]*)?$",
+        "flags": "i",
+        "fnc": "resync",
+        "permission": ""
+      },
+      {
+        "reg": "^#营地共享库$",
+        "flags": "",
+        "fnc": "masterPanel",
+        "permission": "master"
+      },
+      {
+        "reg": "^#接入营地共享库$",
+        "flags": "",
+        "fnc": "masterEnable",
+        "permission": "master"
+      },
+      {
+        "reg": "^#关闭营地共享库$",
+        "flags": "",
+        "fnc": "masterDisable",
+        "permission": "master"
+      },
+      {
+        "reg": "^#营地共享库地址\\s*(\\S+)$",
+        "flags": "",
+        "fnc": "setUrl",
+        "permission": "master"
+      },
+      {
+        "reg": "^#营地共享库令牌\\s*(\\S+)$",
+        "flags": "",
+        "fnc": "setToken",
+        "permission": "master"
+      },
+      {
+        "reg": "^#营地共享库管理密钥\\s*(\\S+)$",
+        "flags": "",
+        "fnc": "setAdminSecret",
+        "permission": "master"
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "shareDeploy.js",
+    "name": "王者营地ID共享库令牌管理",
+    "rules": [
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#营地共享库?发令牌\\s*(.*)$",
+        "flags": "",
+        "fnc": "issue",
+        "permission": "master"
+      },
+      {
+        "reg": "^#营地共享库?接入方$",
+        "flags": "",
+        "fnc": "clients",
+        "permission": "master"
+      },
+      {
+        "reg": "^#营地共享库?吊销\\s*(\\d+)$",
+        "flags": "",
+        "fnc": "revoke",
+        "permission": "master"
+      },
+      {
+        "reg": "^#营地共享库?同步$",
+        "flags": "",
+        "fnc": "syncAll",
+        "permission": "master"
+      },
+      {
+        "reg": "^#营地共享库?查\\s*(\\d{5,12})$",
+        "flags": "",
+        "fnc": "lookup",
+        "permission": "master"
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "shareNotify.js",
+    "name": "王者营地ID共享提醒",
+    "rules": [
+      {
+        "reg": "^#营地共享库提醒$",
+        "flags": "",
+        "fnc": "remind",
+        "permission": "master"
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "skinMissing.js",
+    "name": "王者皮肤缺失",
+    "rules": [
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(缺皮肤|皮肤缺失|还差(什么|哪些)皮肤|缺哪些皮肤)\\s*(.*)$",
+        "flags": "",
+        "fnc": "query",
+        "permission": ""
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "skinNews.js",
+    "name": "王者皮肤上新",
+    "rules": [
+      {
+        "reg": "^#(王者)?(皮肤上新|新皮肤|皮肤日历)$",
+        "flags": "",
+        "fnc": "calendar",
+        "permission": ""
+      },
+      {
+        "reg": "^#(开启|关闭)(王者)?皮肤上新推送$",
+        "flags": "",
+        "fnc": "toggle",
+        "permission": "admin"
+      }
+    ],
+    "tasks": [
+      {
+        "name": "王者皮肤上新",
+        "cron": "0 26 12 * * *"
+      }
+    ]
+  },
+  {
+    "file": "watchBattle.js",
+    "name": "王者营地观战",
+    "rules": [
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(?:营地)?观战\\s*(.*)$",
+        "flags": "",
+        "fnc": "watch",
+        "permission": ""
+      },
+      {
+        "reg": "^#营地开播$",
+        "flags": "",
+        "fnc": "startHinted",
+        "permission": ""
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "whoIsPlaying.js",
+    "name": "王者谁在打游戏",
+    "rules": [
+      {
+        "reg": "^#(谁在(打游戏|打王者|玩王者|上号|排位)|王者在线(列表|状态)?|在线列表)$",
+        "flags": "",
+        "fnc": "list",
+        "permission": ""
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "accountManager.js",
+    "name": "王者账号管理",
+    "rules": [
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(?:营地|我的(?:王者|荣耀|农药)|(?:王者|荣耀|农药))ID\\s*(?:@[^#]*)?$",
+        "flags": "i",
+        "fnc": "myWzryId",
+        "permission": ""
+      },
+      {
+        "reg": "^#(?:获取|怎么看|如何获取)营地ID$",
+        "flags": "i",
+        "fnc": "howToGetWzryId",
+        "permission": ""
+      },
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#绑定营地\\s*(.*)$",
+        "flags": "",
+        "fnc": "bindWzryId",
+        "permission": ""
+      },
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#切换营地\\s*(.*)$",
+        "flags": "",
+        "fnc": "switchWzryId",
+        "permission": ""
+      },
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#删除营地\\s*(.*)$",
+        "flags": "",
+        "fnc": "deleteWzryId",
+        "permission": ""
+      },
+      {
+        "reg": "^#营地wx全局登录$",
+        "flags": "i",
+        "fnc": "wechatGlobalScanLogin",
+        "permission": ""
+      },
+      {
+        "reg": "^#营地QQ全局登录$",
+        "flags": "i",
+        "fnc": "qqGlobalScanLogin",
+        "permission": ""
+      },
+      {
+        "reg": "^#王者用户统计$",
+        "flags": "",
+        "fnc": "showAuthPool",
+        "permission": "master"
+      },
+      {
+        "reg": "^#清理失效营地账号$",
+        "flags": "",
+        "fnc": "clearInvalidCampAuth",
+        "permission": "master"
+      },
+      {
+        "reg": "^#隐藏主页名单$",
+        "flags": "",
+        "fnc": "showHiddenProfiles",
+        "permission": "master"
+      },
+      {
+        "reg": "^#清除隐藏主页\\s*(.*)$",
+        "flags": "",
+        "fnc": "clearHiddenProfiles",
+        "permission": "master"
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "allSeasonPerformance.js",
+    "name": "查询王者全部赛季表现",
+    "rules": [
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#全部(?:排位|赛季)表现\\s*(.*)$",
+        "flags": "",
+        "fnc": "allRank",
+        "permission": ""
+      },
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#全部巅峰表现\\s*(.*)$",
+        "flags": "",
+        "fnc": "allPeak",
+        "permission": ""
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "help.js",
+    "name": "显示王者插件帮助信息",
+    "rules": [
+      {
+        "reg": "^#?王者(荣耀|农药)?(插件|plugin)?(帮助|help)\\s*(.*)$",
+        "flags": "i",
+        "fnc": "showHelp",
+        "permission": ""
+      },
+      {
+        "reg": "^#王者设置$",
+        "flags": "",
+        "fnc": "showMasterPanel",
+        "permission": "master"
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "myKingHomepage.js",
+    "name": "查询王者主页",
+    "rules": [
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#全部(王者)?(主页|卡片|信息)\\s*(?:@[^#]*)?$",
+        "flags": "",
+        "fnc": "allKingHomepage",
+        "permission": ""
+      },
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#王者(主页|卡片|信息)\\s*(.*)$",
+        "flags": "",
+        "fnc": "myKingHomepage",
+        "permission": ""
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "peakPerformance.js",
+    "name": "查询王者巅峰表现",
+    "rules": [
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#巅峰表现\\s*(.*)$",
+        "flags": "",
+        "fnc": "peakPerformance",
+        "permission": ""
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "queryGameStats.js",
+    "name": "查询王者战绩",
+    "rules": [
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#?(排位|巅峰)战绩\\s*(.*)$",
+        "flags": "",
+        "fnc": "queryModeStats",
+        "permission": ""
+      },
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#?(查询|王者)(\\d+)(排位|巅峰)?战绩\\s*(.*)$",
+        "flags": "",
+        "fnc": "queryGameStatsBySlot",
+        "permission": ""
+      },
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#?查战绩\\s*(.+)$",
+        "flags": "",
+        "fnc": "queryHeroStats",
+        "permission": ""
+      },
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#?查(?!询|王)\\s*(.*?)\\s*战\\s*绩\\s*$",
+        "flags": "",
+        "fnc": "queryHeroStats",
+        "permission": ""
+      },
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#?(查询|王者)战绩\\s*(.*)$",
+        "flags": "",
+        "fnc": "queryGameStats",
+        "permission": ""
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "rankList.js",
+    "name": "王者排行榜",
+    "rules": [
+      {
+        "reg": "^#(排位|巅峰)总排名\\s*(刷新)?$",
+        "flags": "",
+        "fnc": "globalRank",
+        "permission": ""
+      },
+      {
+        "reg": "^#(排位|巅峰)排名\\s*(刷新)?$",
+        "flags": "",
+        "fnc": "groupRank",
+        "permission": ""
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "seasonPage.js",
+    "name": "查询王者赛季表现",
+    "rules": [
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#排位表现\\s*(.*)$",
+        "flags": "",
+        "fnc": "rankPage",
+        "permission": ""
+      },
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#赛季表现\\s*(.*)$",
+        "flags": "",
+        "fnc": "seasonAll",
+        "permission": ""
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "heroList.js",
+    "name": "查询王者常用英雄",
+    "rules": [
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(王者)?(常用英雄|英雄战力榜)\\s*(.*)$",
+        "flags": "",
+        "fnc": "heroList",
+        "permission": ""
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "heroTierList.js",
+    "name": "查询王者英雄梯度榜",
+    "rules": [
+      {
+        "reg": "^#(王者)?(英雄梯度|梯度|强度)\\s*(.*)$",
+        "flags": "",
+        "fnc": "heroTierList",
+        "permission": ""
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "myHeroList.js",
+    "name": "查询王者我的英雄",
+    "rules": [
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(王者)?我的英雄\\s*(.*)$",
+        "flags": "",
+        "fnc": "myHeroList",
+        "permission": ""
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "skinWall.js",
+    "name": "查询王者皮肤墙",
+    "rules": [
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(王者)?皮肤墙\\s*(.*)$",
+        "flags": "",
+        "fnc": "skinWall",
+        "permission": ""
+      },
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(王者)?全部皮肤\\s*(.*)$",
+        "flags": "",
+        "fnc": "allSkins",
+        "permission": ""
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "update.js",
+    "name": "王者插件_更新",
+    "rules": [
+      {
+        "reg": "^#*(王者|农药)(插件)?(强制)?更新$",
+        "flags": "",
+        "fnc": "update",
+        "permission": "master"
+      },
+      {
+        "reg": "^#*(王者|农药)(插件)?更新(日志|记录)$",
+        "flags": "",
+        "fnc": "update_log",
+        "permission": "master"
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "heroFightingCapacity.js",
+    "name": "查询王者英雄战力",
+    "rules": [
+      {
+        "reg": "^#查战力.*",
+        "flags": "",
+        "fnc": "checkHeroFightingCapacity",
+        "permission": ""
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "heroSkin.js",
+    "name": "查询王者英雄皮肤",
+    "rules": [
+      {
+        "reg": "^#查皮肤.*",
+        "flags": "",
+        "fnc": "checkHeroSkin",
+        "permission": ""
+      }
+    ],
+    "tasks": []
+  }
+]

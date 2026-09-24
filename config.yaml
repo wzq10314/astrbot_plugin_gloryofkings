@@ -1,0 +1,48 @@
+# AstrBot 后台配置为主要入口，此文件提供默认值。
+admins: []
+llm_enabled: true
+engine_auto_install: true
+engine_auto_browser: true
+engine_auto_browser_system: true
+engine_node: ''
+engine_npm_registry: https://registry.npmmirror.com
+browser_path: ''
+bot_overrides: '{}'
+onlineReminder: true
+battleResultCron: 0 */2 * * * *
+idleBackoffMax: 5
+dailyReportCron: 0 47 23 * * *
+weeklyReportCron: 0 7 22 * * 0
+monthlyReportCron: 0 41 23 28-31 * *
+groupDailyReportCron: 0 22 23 * * *
+groupWeeklyReportCron: 0 34 21 * * 0
+groupMonthlyReportCron: 0 18 23 28-31 * *
+quoteReply: true
+imgCacheMaxMB: 200
+imgCacheCleanCron: 0 12 4 * * *
+skinNewsCron: 0 26 12 * * *
+blackList: []
+blackListFollowGlobal: true
+shareApiUrl: ''
+shareToken: ''
+shareAdminSecret: ''
+shareEnabled: false
+distUrl: ''
+distToken: ''
+distAdminSecret: ''
+distRepoUrl: ''
+watchApiUrl: http://127.0.0.1:8899
+watchPublicUrl: ''
+watchHintEnabled: true
+watchHintAfterMin: 3
+watchHintPollMs: 15000
+campRenewCron: 0 13 5 * * *
+campImApiUrl: http://127.0.0.1:8900
+campImEnabled: true
+campImPollMs: 3000
+campImPushImage: true
+auth_gameAreaId: 1
+auth_gameUserSex: 1
+auth_kohDimGender: 2
+auth_serverTimeOffsetMs: 0
+auth_extraHeaders: '{}'

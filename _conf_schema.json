@@ -1,0 +1,239 @@
+{
+  "admins": {
+    "description": "附加管理员 QQ（同时认可 AstrBot 管理员）",
+    "type": "list",
+    "default": []
+  },
+  "llm_enabled": {
+    "description": "允许 LLM 自然语言调用王者查询、账号和订阅工具",
+    "type": "bool",
+    "default": true
+  },
+  "engine_auto_install": {
+    "description": "首次加载自动安装锁定的 Node 依赖",
+    "type": "bool",
+    "default": true
+  },
+  "engine_auto_browser": {
+    "description": "自动检测并准备 Chromium（优先复用已有浏览器）",
+    "type": "bool",
+    "default": true
+  },
+  "engine_auto_browser_system": {
+    "description": "Debian/root 容器允许补装 Chromium 和系统库",
+    "type": "bool",
+    "default": true
+  },
+  "engine_node": {
+    "description": "Node.js 22+ 路径，留空使用 PATH",
+    "type": "string",
+    "default": ""
+  },
+  "engine_npm_registry": {
+    "description": "npm 下载镜像（可改为 https://registry.npmjs.org）",
+    "type": "string",
+    "default": "https://registry.npmmirror.com"
+  },
+  "browser_path": {
+    "description": "Chromium 可执行文件路径，留空自动检测",
+    "type": "string",
+    "default": ""
+  },
+  "bot_overrides": {
+    "description": "多机器人独立配置，JSON：{\"机器人QQ\":{\"watchApiUrl\":\"http://127.0.0.1:8899\"}}",
+    "type": "string",
+    "default": "{}",
+    "editor_mode": true
+  },
+  "onlineReminder": {
+    "description": "战绩推送总开关（开局提醒 + 打完推战绩，用户需各自 #开启战绩推送 订阅）",
+    "type": "bool",
+    "default": true
+  },
+  "battleResultCron": {
+    "description": "战绩推送的检查间隔（6 位 cron，含秒）。每个订阅串行拉一次营地接口、间隔 800ms， 设太短会触发营地频控 -30107，不建议低于 2 分钟",
+    "type": "string",
+    "default": "0 */2 * * * *"
+  },
+  "idleBackoffMax": {
+    "description": "玩家离线时把检查间隔拉长到几倍 battleResultCron（离线的号既不会开局也不会出新战绩， 照高频查纯属白耗配额）。默认 5，即 2 分钟的 cron 在长时间离线后退到 10 分钟一次。 只给 #谁在打游戏 采集、不往群里播报的「影子订阅」不走这里：他们只在有人查看那份名单时现刷。 代价是上线播报最坏晚这么久；填 1 = 关闭自适应，恒定按 cron 轮询",
+    "type": "int",
+    "default": 5
+  },
+  "dailyReportCron": {
+    "description": "战绩日报的推送时间（6 位 cron）。留空 = 不自动推送，只保留 #王者日报 指令。 刻意避开整点：整点是所有人 cron 的默认值，营地那头也扎堆",
+    "type": "string",
+    "default": "0 47 23 * * *"
+  },
+  "weeklyReportCron": {
+    "description": "战绩周报的推送时间。默认周日晚（一周打完就发）；配成周一也行，那时统计的是上一整周",
+    "type": "string",
+    "default": "0 7 22 * * 0"
+  },
+  "monthlyReportCron": {
+    "description": "战绩月报的推送时间。月报口径是「本月至今」，只有月末推才是完整的一个月， 但 cron 表达不了「每月最后一天」，所以写成 28-31 号每晚触发、代码里挑真正的最后一天",
+    "type": "string",
+    "default": "0 41 23 28-31 * *"
+  },
+  "groupDailyReportCron": {
+    "description": "群日报的推送时间（群里 #开启群日报推送 后生效）。群报要逐个扫本群绑定的账号， 一个号至少一次营地请求，25 个号约 30 秒，所以和个人日报错开时间，别撞在一起",
+    "type": "string",
+    "default": "0 22 23 * * *"
+  },
+  "groupWeeklyReportCron": {
+    "description": "群周报的推送时间",
+    "type": "string",
+    "default": "0 34 21 * * 0"
+  },
+  "groupMonthlyReportCron": {
+    "description": "群月报的推送时间。同 monthlyReportCron，28-31 号触发、只在月末那天真推",
+    "type": "string",
+    "default": "0 18 23 28-31 * *"
+  },
+  "quoteReply": {
+    "description": "回复时是否引用触发指令那条消息",
+    "type": "bool",
+    "default": true
+  },
+  "imgCacheMaxMB": {
+    "description": "图片缓存目录（data/imgCache）的容量上限，单位 MB。填 0 = 不限量。 单张图平均 490KB，#皮肤墙 / #全部皮肤 一次会拉几百张，几个人轮着查就是几百 MB； 7 天过期只管时间管不住量，超出上限时按下载时间从旧到新削减",
+    "type": "int",
+    "default": 200
+  },
+  "imgCacheCleanCron": {
+    "description": "图片缓存的定时清理时间（6 位 cron）。默认凌晨 4 点，避开白天出图高峰",
+    "type": "string",
+    "default": "0 12 4 * * *"
+  },
+  "skinNewsCron": {
+    "description": "皮肤上新推送的检查时间（6 位 cron）。留空 = 不自动推送，只保留 #皮肤上新 指令。 数据来自官网资料库（不占营地配额），每天看一次就够：新皮肤都是提前几天进清单的",
+    "type": "string",
+    "default": "0 26 12 * * *"
+  },
+  "blackList": {
+    "description": "插件黑名单。名单里的 QQ 发任何王者指令都不会有回应，之前订阅的战绩推送 / 上下线提醒 / 日报周报月报也不再推，群报和排行榜里也不统计他。订阅数据不会被删，移出名单即恢复。 主人不受影响。也可以在群里发 #王者拉黑@某人 / #王者取消拉黑@某人 增删",
+    "type": "list",
+    "default": []
+  },
+  "blackListFollowGlobal": {
+    "description": "是否把机器人全局黑名单（Yunzai 的 config/config/other.yaml，blackUser / blackQQ 两个字段） 里的人也当成拉黑。默认开：全局名单只挡用户主动发的指令，挡不住插件按 cron 主动发的推送， 开着才能把「人已经拉黑了，战绩推送还在推」这种情况一起停掉",
+    "type": "bool",
+    "default": true
+  },
+  "shareApiUrl": {
+    "description": "营地ID共享库的地址。留空 = 不接入，用户发 #开启营地ID共享 会被提示「还没接入」。 共享库由主人统一提供，地址进群 972915804 找主人要（不再支持自行部署）。 在群里发 #营地共享库地址 <地址> 也能改，不用手改这里",
+    "type": "string",
+    "default": ""
+  },
+  "shareToken": {
+    "description": "⚠️ 已废弃：令牌合并到下面的 distToken 了（观战 / 营地消息 / 共享库 三套共用一个）。 这里只在读取时作回退 —— 合并之前配过的机器不用重新填，新配置请用 distToken。",
+    "type": "string",
+    "default": ""
+  },
+  "shareAdminSecret": {
+    "description": "共享库的管理密钥（服务端 .env 里的 GOK_ADMIN_SECRET），远程管理专用。 库跑在别的机器或 Docker 上时，配上它就能用 #营地共享库发令牌 / 接入方 / 吊销 这些指令远程管库；本机部署用不到（插件自己读 .env）。权限很大，别往群里贴； 用 #营地共享库管理密钥 <密钥> 设置（只收私聊）",
+    "type": "string",
+    "default": ""
+  },
+  "shareEnabled": {
+    "description": "是否接入共享库。对应 #接入营地共享库 / #关闭营地共享库 两个指令， 也是首次安装和每次更新后私聊征询主人的那个开关。默认关： 不接入时本插件所有功能都不受影响，只是用不到「换机器人免重绑」 共享库由主人统一提供，地址和令牌进群 972915804 找主人要",
+    "type": "bool",
+    "default": false
+  },
+  "distUrl": {
+    "description": "服务端代码分发的地址（主人服务器上跑的那个分发服务，默认端口 6868）。 营地观战接入 / #营地消息接入 会把它写进来，也可以直接在锅巴里填。 留空 = 还没接入，部署指令会提示进群 972915804 找主人要。",
+    "type": "string",
+    "default": ""
+  },
+  "distToken": {
+    "description": "主人签发的接入令牌 —— **观战 / 营地消息 / 共享库 三套共用这一个**。 主人签发时是「代共享库签」的，所以一个值三边都认，不用分别填。 ⚠️ 这是凭证，别往群里贴；用 #营地共享库令牌 <令牌> 设置。",
+    "type": "string",
+    "default": ""
+  },
+  "distAdminSecret": {
+    "description": "分发服务的管理密钥（主人用：签令牌 / 看接入方 / 吊销）。 本机部署了分发服务时会自动读它的 .env，不用填；分发服务跑在别的机器上时才要填。",
+    "type": "string",
+    "default": ""
+  },
+  "distRepoUrl": {
+    "description": "分发服务的代码在哪个仓库（部署时拉它的 dist 分支）。 一般不用改 —— 只有换成自己的私库时才要。",
+    "type": "string",
+    "default": ""
+  },
+  "watchApiUrl": {
+    "description": "观战服务的地址（server/watch-server.js，用 pm2 托管的那个独立进程）。 营地观战 查好友、开直播都走它。换端口了改这里，不用重启云崽。",
+    "type": "string",
+    "default": "http://127.0.0.1:8899"
+  },
+  "watchPublicUrl": {
+    "description": "观战直播间对外的地址 —— 就是发到群里、给群友点开的那个。 留空 = 用上面那个，但 127.0.0.1 只有本机能开，群友点了是空的。 部署时一定填成外网能访问的地址（域名或公网 IP），比如 http://xxx.com:8899",
+    "type": "string",
+    "default": ""
+  },
+  "watchHintEnabled": {
+    "description": "开播引导：订阅了上下线提醒的人上线后，盯他进对局；进对局满 N 分钟且确认能看时， 往群里发一条「要不要开播」的提示（不 @ 订阅者，群里谁都能发 #营地开播 开这一路）。 只对「是某个全局账号好友」的号生效 —— 不是好友的话取流会被拒，提示了也开不了。",
+    "type": "bool",
+    "default": true
+  },
+  "watchHintAfterMin": {
+    "description": "进对局满几分钟才发开播提示",
+    "type": "int",
+    "default": 3
+  },
+  "watchHintPollMs": {
+    "description": "盯梢轮询间隔（毫秒）。这是插件里唯一的短间隔定时器，只盯「刚上线且是好友」的那几个号。 别调太小：营地接口有频控，命中一次要静默 12 小时。下限 5000。",
+    "type": "int",
+    "default": 15000
+  },
+  "campRenewCron": {
+    "description": "营地登录态保活。营地的 token **不给过期时间、也没有刷新接口** —— 它是「用则续命、 闲置才死」（闲置久了报登录态失效）。这里配个时间，插件会定期给每个号戳一下把它保住， QQ 和微信都适用。留空 = 关掉定时（还能手发 #营地续期）。 QQ 号万一真失效了还能自动重登救回；微信失效只能重新扫码（营地只认扫码换来的 code）。",
+    "type": "string",
+    "default": "0 13 5 * * *"
+  },
+  "campImApiUrl": {
+    "description": "营地消息服务地址（server-im/camp-im-server.js，用 pm2 托管的独立进程）。 它给每个营地号挂一条 ws 长连接收消息，插件这边定时来拉、按归属人转发到 QQ 私信。 换端口了改这里，不用重启云崽。装好它：发一句 #营地消息部署。",
+    "type": "string",
+    "default": "http://127.0.0.1:8900"
+  },
+  "campImEnabled": {
+    "description": "营地消息总开关。关掉后插件不再拉消息、也不再推私信（服务端照常收）。",
+    "type": "bool",
+    "default": true
+  },
+  "campImPollMs": {
+    "description": "拉消息的间隔（毫秒）。走本机回环、无风控，只影响推送延迟，别调太小（下限 1000）。",
+    "type": "int",
+    "default": 3000
+  },
+  "campImPushImage": {
+    "description": "推送时带不带对方头像。关掉就是纯文字（头像加载慢或发图失败时更稳）。",
+    "type": "bool",
+    "default": true
+  },
+  "auth_gameAreaId": {
+    "description": "原版请求默认参数 gameAreaId；正常情况下无需修改。",
+    "type": "int",
+    "default": 1
+  },
+  "auth_gameUserSex": {
+    "description": "原版请求默认参数 gameUserSex；正常情况下无需修改。",
+    "type": "int",
+    "default": 1
+  },
+  "auth_kohDimGender": {
+    "description": "原版请求默认参数 kohDimGender；正常情况下无需修改。",
+    "type": "int",
+    "default": 2
+  },
+  "auth_serverTimeOffsetMs": {
+    "description": "原版请求默认参数 serverTimeOffsetMs；正常情况下无需修改。",
+    "type": "int",
+    "default": 0
+  },
+  "auth_extraHeaders": {
+    "description": "原版请求默认参数 extraHeaders；正常情况下无需修改。",
+    "type": "string",
+    "default": "{}",
+    "editor_mode": true
+  }
+}
