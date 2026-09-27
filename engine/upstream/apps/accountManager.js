@@ -1,5 +1,5 @@
 import path from 'path'
-import { writeYamlFile, readYamlFile, Button, AT_HEAD, AT_TAIL, stripAtText, resolveTargetUserId, shouldQuote, invalidateShareCache, querySharedBind, listHiddenProfiles, clearHiddenProfile, clearAllHiddenProfiles } from '#utils'
+import { getImgType, writeYamlFile, readYamlFile, Button, AT_HEAD, AT_TAIL, stripAtText, resolveTargetUserId, shouldQuote, invalidateShareCache, querySharedBind, listHiddenProfiles, clearHiddenProfile, clearAllHiddenProfiles } from '#utils'
 import puppeteer from '../../../lib/puppeteer/puppeteer.js'
 import { PluginData, PluginPath } from '#components'
 import authStore from '../utils/authStore.js'
@@ -145,7 +145,7 @@ export class AccountManager extends plugin {
     ]
 
     return await puppeteer.screenshot('accountManage', {
-      imgType: 'webp',
+      imgType: getImgType(),
       tplFile: 'plugins/GloryOfKings-Plugin/resources/html/accountManage.html',
       type,
       wzryId,
@@ -159,7 +159,7 @@ export class AccountManager extends plugin {
   async generateAuthPoolOverviewHTML(data) {
     return await puppeteer.screenshot('authPoolOverview', {
       tplFile: 'plugins/GloryOfKings-Plugin/resources/html/authPoolOverview.html',
-      imgType: 'webp',
+      imgType: getImgType(),
       ...data
     })
   }

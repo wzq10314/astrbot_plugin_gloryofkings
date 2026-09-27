@@ -46,3 +46,10 @@ auth_gameUserSex: 1
 auth_kohDimGender: 2
 auth_serverTimeOffsetMs: 0
 auth_extraHeaders: '{}'
+imgType: "jpeg"
+dependencyRegistry: "https://registry.npmmirror.com"
+dependencyProxy: ""
+watchCdnHttps: ""
+
+# 只有此列表中的服务可接收全局营地账号登录凭据；默认不发送。
+remoteAccountAllowedUrls: []

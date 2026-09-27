@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {register} from 'node:module';
-import renderer,{render} from '../engine/renderer.mjs';
+import renderer,{render,imageType} from '../engine/renderer.mjs';
 register('../engine/loader.mjs',import.meta.url);
 const root=path.resolve(process.argv[2]);
 const source=path.join(root,'plugins/GloryOfKings-Plugin');
@@ -12,6 +12,29 @@ globalThis.logger=new Proxy({},{get:()=>()=>{}});
 globalThis.gok={root,call:async()=>{throw Error('RemoteAssetsDisabledInTest')},emit:()=>{}};
 let checks=0;
 try {
+  assert.equal(imageType('jpg'),'jpeg');
+  assert.equal(imageType('invalid'),'jpeg');
+  const fixtureDir=path.join(source,'resources/html');
+  const fixture=path.join(fixtureDir,'format-test.html');
+  fs.writeFileSync(fixture,'<div id="container" style="width:100px;height:100px;background:red">TEST</div>');
+  try {
+    for(const format of ['jpeg','png','webp']){
+      const bytes=await render('format',{tplFile:'plugins/GloryOfKings-Plugin/resources/html/format-test.html',imgType:format});
+      if(format==='jpeg')assert.equal(bytes.subarray(0,3).toString('hex'),'ffd8ff');
+      if(format==='png')assert.equal(bytes.subarray(0,8).toString('hex'),'89504e470d0a1a0a');
+      if(format==='webp')assert.equal(bytes.subarray(8,12).toString(),'WEBP');
+      checks++;
+    }
+  }finally{fs.unlinkSync(fixture)}
+  const {sendPrivate}=await load('utils/privateMsg.js');
+  let temporaryCalls=0;
+  const receiptBot={adapter:{name:'OneBotv11'},pickFriend:()=>({sendMsg:async()=>({status:'ok'})}),
+    sendApi:async(action,params)=>{assert.equal(action,'send_private_msg');assert.equal(params.group_id,987654321);temporaryCalls++;return {message_id:'valid'}},
+    pickGroup:()=>{throw Error('Never send to group')}};
+  assert.equal((await sendPrivate('12345001','fixture',{bot:receiptBot,groupId:'987654321'})).via,'group_temp');
+  assert.equal(temporaryCalls,1);checks++;
+  receiptBot.sendApi=async()=>({status:'failed',retcode:1200,message_id:'invalid'});
+  assert.equal((await sendPrivate('12345001','fixture',{bot:receiptBot,groupId:'987654321'})).ok,false);checks++;
   const {buildTrendView,pickPeakBattles}=await load('utils/scoreTrend.js');
   const scores=[1500,1530,1510,1550,1570];
   const battles=scores.map((score,i)=>({mapName:'巅峰赛',dtEventTime:1790180000+i*3600,

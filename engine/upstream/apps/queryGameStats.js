@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'path'
 import puppeteer from '../../../lib/puppeteer/puppeteer.js'
 import { PluginData, PluginPath } from '#components'
-import { ApiService, readYamlFile, getUserAvatar, isQQNumber, Button, AT_HEAD, stripAtText, resolveTargetUserId, resolveUserData, shouldQuote, resolveMemberName } from '#utils'
+import { getImgType, ApiService, readYamlFile, getUserAvatar, isQQNumber, Button, AT_HEAD, stripAtText, resolveTargetUserId, resolveUserData, shouldQuote, resolveMemberName } from '#utils'
 import { estimateRequestSeconds } from '../utils/api.js'
 // 详情图与评价图标解析被战绩推送共用，抽到了 utils/battleDetailImage.js
 import { fetchBattleDetail, renderBattleDetail, resolveMvp, resolveEvaluate, buildKillTags } from '../utils/battleDetailImage.js'
@@ -191,7 +191,7 @@ export class QueryGameStats extends plugin {
 
     if (!heroBattles.length) {
       const emptyImg = await puppeteer.screenshot('QueryGameRecordList', {
-        imgType: 'webp',
+        imgType: getImgType(),
         tplFile: 'plugins/GloryOfKings-Plugin/resources/html/QueryGameRecordList.html',
         data: [],
         qqAvatar,
@@ -216,7 +216,7 @@ export class QueryGameStats extends plugin {
     const processedData = shown.map(this.toListItem)
 
     const listImg = await puppeteer.screenshot('QueryGameRecordList', {
-      imgType: 'webp',
+      imgType: getImgType(),
       tplFile: 'plugins/GloryOfKings-Plugin/resources/html/QueryGameRecordList.html',
       data: processedData,
       qqAvatar,
@@ -290,7 +290,7 @@ export class QueryGameStats extends plugin {
       })
 
       const emptyImg = await puppeteer.screenshot('QueryGameRecordList', {
-        imgType: 'webp',
+        imgType: getImgType(),
         tplFile: 'plugins/GloryOfKings-Plugin/resources/html/QueryGameRecordList.html',
         data: [],
         qqAvatar,
@@ -331,7 +331,7 @@ export class QueryGameStats extends plugin {
     const processedData = battleList.list.map(this.toListItem)
 
     const listImg = await puppeteer.screenshot('QueryGameRecordList', {
-      imgType: 'webp',
+      imgType: getImgType(),
       tplFile: 'plugins/GloryOfKings-Plugin/resources/html/QueryGameRecordList.html',
       data: processedData,
       qqAvatar,

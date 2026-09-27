@@ -7,6 +7,10 @@ import puppeteer from 'puppeteer-core';
 import {chromium} from 'playwright';
 
 let browser, opening, renderQueue = Promise.resolve();
+export function imageType(value) {
+  const type=String(value || 'jpeg').toLowerCase().trim();
+  return type==='jpg' ? 'jpeg' : ['jpeg','png','webp'].includes(type) ? type : 'jpeg';
+}
 export function executable() {
   const configured = process.env.GOK_BROWSER;
   if (configured && fs.existsSync(configured)) return configured;
@@ -87,7 +91,7 @@ export async function render(name, data, onReady) {
     const element=await page.$('#container') || await page.$('.container') || await page.$('body');
     const box=await element.boundingBox();
     if (!box || box.height>30000 || box.width>5000) throw Error('RenderSizeLimit');
-    return Buffer.from(await element.screenshot({type:'png',timeout:45000}));
+    return Buffer.from(await element.screenshot({type:imageType(data.imgType),timeout:45000}));
   } finally { await page?.close().catch(()=>{}); fs.rmSync(htmlFile,{force:true}); }
 }
 export default {

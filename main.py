@@ -15,7 +15,7 @@ from .services.tool_commands import normalize as normalize_tool_command
 from .services.tool_commands import private_only, PRIVATE_NOTICE
 
 
-@register('astrbot_plugin_gloryofkings', 'wzq10314', '王者营地全功能核心 AstrBot 适配', '1.0.4')
+@register('astrbot_plugin_gloryofkings', 'wzq10314', '王者营地全功能核心 AstrBot 适配', '1.0.6')
 class GloryOfKingsPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -188,7 +188,7 @@ class GloryOfKingsPlugin(Star):
         订阅：开启或关闭战绩推送、上下线提醒、在线状态、日报推送、周报推送、月报推送；
         开启或关闭群日报推送、群周报推送、群月报推送、皮肤上新推送（当前群管理员权限）；
         战绩推送状态、群报状态。推送发到执行命令的当前群，不能指定其他群。
-        营地服务：营地观战、营地观战 编号、营地观战 在播、营地观战 停、营地开播、
+        营地服务：营地观战、营地观战 编号、营地观战 在播、营地观战 停、营地开播、观战大神、观战大神 打野、观战大神 在播、
         营地好友、营地消息、营地消息开、营地消息关；观战/消息需要作者的外置服务及登录态。
         营地好友及所有 IM 消息功能只能在私聊调用。群聊中请提示转到私聊，不能展示好友或消息内容。
         共享：开启营地ID共享、关闭营地ID共享、营地ID共享状态。仅在用户明确要求共享时操作。
@@ -241,7 +241,7 @@ class GloryOfKingsPlugin(Star):
         if time.monotonic()-timestamp<300 and text: return text
         manifest=json.loads((Path(__file__).parent/'UPSTREAM.json').read_text(encoding='utf-8'))
         current=manifest['commit']
-        prefix=f'AstrBot 适配版 1.0.4\n上游：{manifest["repository"]}\n本版基准：{current[:12]}'
+        prefix=f'AstrBot 适配版 1.0.6\n上游：{manifest["repository"]}\n本版基准：{current[:12]}'
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15),trust_env=True) as client:
                 async with client.get('https://gitee.com/api/v5/repos/longhengmu/GloryOfKings-Plugin/commits',params={'sha':'master','per_page':5}) as response:

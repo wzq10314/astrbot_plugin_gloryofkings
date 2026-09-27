@@ -35,6 +35,14 @@ class ServerDependencies(unittest.IsolatedAsyncioTestCase):
         with patch.object(module,'run_process',new_callable=AsyncMock,return_value=ProcessResult(0,'')) as run:
             self.assertEqual(await self.installer.ensure(self.server),{'ok':True,'changed':False})
             self.assertEqual(run.await_count,1)
+    async def test_deployment_registry_and_proxy(self):
+        self.installer.settings.update(dependencyRegistry='https://registry.example.test',dependencyProxy='http://127.0.0.1:7897')
+        with patch.object(module,'run_process',new_callable=AsyncMock) as run:
+            run.side_effect=[ProcessResult(1,''),ProcessResult(0,''),ProcessResult(0,'')]
+            self.assertTrue((await self.installer.ensure(self.server))['ok'])
+            call=run.call_args_list[1]
+            self.assertIn('https://registry.example.test',call.args[0])
+            self.assertEqual(call.kwargs['env']['HTTPS_PROXY'],'http://127.0.0.1:7897')
     async def test_install_failure_is_not_success_and_redacts_output(self):
         with patch.object(module,'run_process',new_callable=AsyncMock) as run:
             run.side_effect=[ProcessResult(1,''),ProcessResult(1,'private-secret')]

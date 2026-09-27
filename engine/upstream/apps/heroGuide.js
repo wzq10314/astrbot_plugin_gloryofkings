@@ -7,7 +7,7 @@
  *     拿不到就自动跳过这两块，不影响出图。
  */
 import puppeteer from '../../../lib/puppeteer/puppeteer.js'
-import { Button, shouldQuote, resolveCurrentId } from '#utils'
+import { getImgType, Button, shouldQuote, resolveCurrentId } from '#utils'
 import { getHeroGuide, getCampBuild } from '../utils/heroGuide.js'
 
 export class HeroGuide extends plugin {
@@ -68,7 +68,7 @@ export class HeroGuide extends plugin {
     const camp = await getCampBuild(hero.ename, boundCampId || '', String(e.user_id))
 
     const img = await puppeteer.screenshot('HeroGuide', {
-      imgType: 'webp',
+      imgType: getImgType(),
       tplFile: 'plugins/GloryOfKings-Plugin/resources/html/HeroGuide.html',
       heroName: hero.name,
       // fllb_2105 本身可能已经是「对抗路/打野」这种多定位串，原样透传；

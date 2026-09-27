@@ -11,6 +11,7 @@
 import path from 'path'
 import puppeteer from '../../../lib/puppeteer/puppeteer.js'
 import {
+  getImgType,
   ApiService, Button, AT_HEAD, stripAtText, resolveTargetUserId, resolveUserData,
   shouldQuote, getUserAvatar, resolveMemberName, isQQNumber
 } from '#utils'
@@ -118,7 +119,7 @@ export class HeroDetail extends plugin {
       : (e.sender?.card || e.sender?.nickname || e.nickname || (isQQNumber(userId) ? String(userId) : '召唤师'))
 
     const img = await puppeteer.screenshot('HeroDetail', {
-      imgType: 'webp',
+      imgType: getImgType(),
       tplFile: 'plugins/GloryOfKings-Plugin/resources/html/HeroDetail.html',
       _res_path: '../../../plugins/GloryOfKings-Plugin/resources/',
       qqAvatar,

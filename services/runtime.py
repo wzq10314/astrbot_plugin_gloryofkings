@@ -29,6 +29,28 @@ def prepare_runtime(engine: Path, destination: Path, settings: dict, host_blackl
             raise ValueError('Invalid stale source path')
         path.unlink(missing_ok=True)
     previous_file.write_text(json.dumps(list(manifest['files'])), encoding='utf-8')
+    remote = target / 'utils/remoteAccounts.js'
+    text = remote.read_text(encoding='utf-8')
+    policy = (engine / 'remote-policy.mjs').resolve().as_uri()
+    text = (f'import {{approvedRemote, REMOTE_NOTICE}} from {json.dumps(policy)};\n'
+            "import AdapterConfig from '../components/Config.js';\n" + text)
+    anchor = '  const accounts = usableGlobalAccounts()'
+    if text.count(anchor) != 1:
+        raise ValueError('Upstream remote account hook changed')
+    text = text.replace(anchor, "  if (!approvedRemote(url, AdapterConfig.getConfig('config').remoteAccountAllowedUrls)) return {ok: false, skipped: 'not-approved', error: REMOTE_NOTICE}\n" + anchor)
+    text = text.replace("      method: 'POST',", "      method: 'POST',\n      redirect: 'error',")
+    text = text.replace('这个服务设了口令，插件连不上（让对方去掉服务端口令）',
+                        '服务要求身份验证。请由服务提供者配置兼容的认证接入；不要关闭公网服务的认证。')
+    remote.write_text(text, encoding='utf-8')
+    for name in ('watchDeploy.js', 'campImDeploy.js'):
+        file = target / 'apps' / name
+        text = file.read_text(encoding='utf-8')
+        anchor = '    const probe = await probeRemoteStatus(url)'
+        if text.count(anchor) != 1:
+            raise ValueError('Upstream remote connection hook changed: ' + name)
+        text = f'import {{approvedRemote, REMOTE_NOTICE}} from {json.dumps(policy)};\n' + text
+        text = text.replace(anchor, "    if (!approvedRemote(url, Config.getConfig('config').remoteAccountAllowedUrls)) return e.reply(REMOTE_NOTICE, shouldQuote())\n" + anchor)
+        file.write_text(text, encoding='utf-8')
     for name in ('campIm.js', 'campFriend.js'):
         file = target/'apps'/name
         text = file.read_text(encoding='utf-8')
@@ -50,6 +72,11 @@ def prepare_runtime(engine: Path, destination: Path, settings: dict, host_blackl
       if (!prepared.ok) throw new Error(prepared.message)
 
 """
+        if name == 'campImDeploy.js':
+            upstream_hook = "      const nodeDependencies = await ensureDependencies({ needWs: true, nodeDir: SERVER_DIR, cfg: cfg(), logger })\n      if (!nodeDependencies.ok) throw new Error(nodeDependencies.messages.join('；'))"
+            if text.count(upstream_hook) != 1:
+                raise ValueError('Upstream IM dependency hook changed')
+            text = text.replace(upstream_hook, '')
         file.write_text(text.replace(anchor, hook+anchor), encoding='utf-8')
     (destination / 'package.json').write_text('{"type":"module"}', encoding='utf-8')
     # npm dependencies are resolved by loader.mjs for upstream imports.
@@ -71,6 +98,7 @@ def prepare_runtime(engine: Path, destination: Path, settings: dict, host_blackl
         file=target/'data'/name
         if not file.exists(): file.write_text(yaml.safe_dump(initial),encoding='utf-8')
     defaults = yaml.safe_load((source / 'config/default_config/config.yaml').read_text(encoding='utf-8'))
+    defaults['remoteAccountAllowedUrls'] = []
     config_file = target / 'config/config/config.yaml'
     config_file.parent.mkdir(parents=True, exist_ok=True)
     current = yaml.safe_load(config_file.read_text(encoding='utf-8')) if config_file.exists() else {}

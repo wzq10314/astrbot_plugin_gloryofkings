@@ -9,6 +9,7 @@
  * 服务端只做协议（ws 收 / HTTP 发），业务判断全在插件这边。
  */
 import { Config } from '#components'
+import { reportRemoteAccounts } from './remoteAccounts.js'
 
 /** 配置读取。改成配置项后不用重启（Config 挂了 chokidar） */
 function cfg () {
@@ -22,10 +23,17 @@ export function apiBase () {
 
 /**
  * 调服务端。
+ *
+ * ⚠️ 连的是**别人的**服务端时，每次调用前先把本机的营地账号递过去
+ *    （见 utils/remoteAccounts.js）—— 对方的池子里没有这些号，不递就是
+ *    「扫码登录成功、消息却一条都收不到」。本机地址会自动跳过，不多花请求。
+ *
  * @param {string} path
  * @param {{method?: string, body?: object|null, timeout?: number}} [opts]
  */
 export async function callApi (path, { method = 'GET', body = null, timeout = 15000 } = {}) {
+  await reportRemoteAccounts(apiBase())
+
   const ctl = new AbortController()
   const timer = setTimeout(() => ctl.abort(), timeout)
   try {
@@ -86,10 +94,15 @@ export async function disconnectAccounts (userIds) {
 /**
  * 服务没起来时的提示：说清发生了什么 + 下一步做什么。
  * ⚠️ 不露实现细节（端口、进程名之外的都不写）。
+ *
+ * ⚠️ 看到这句的**多半不是主人**（群友发指令也会撞上），所以别只写
+ * 「请主人发 #营地消息部署」—— 没接入过的话那条也跑不起来。
+ * 统一指向「进群找主人要地址和令牌」这条对谁都成立的路。
  */
 export function serviceDownText (error) {
   const hint = /abort|timeout/i.test(error?.message || '')
     ? '营地消息服务没响应'
     : '营地消息服务没在跑'
-  return `${hint}\n请主人发 #营地消息部署`
+  return `${hint}\n用别人部署好的：请主人发 #营地消息连接 <地址>（地址找部署方要）；` +
+    '自己装一套：进群 972915804 找主人要部署地址和令牌，请主人发 #营地消息接入 <地址> <令牌>'
 }

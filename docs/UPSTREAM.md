@@ -2,11 +2,11 @@
 
 指定上游固定为 https://gitee.com/longhengmu/GloryOfKings-Plugin ，默认 master。不要误切到原作者仓库或其他 fork。
 
-本次基准 86ac5b6751630eadb34719aa2a56591c53767e0e：`fix(营地消息): 状态口径说清 + 待处理条数按实际积压算`。
+本次基准 f92e0a64e4668dbff5d7c02d8fef554f32a527b5（2026-09-25）：合并图片格式配置，同时包含部署依赖、私聊回执与观战链接改进。
 
 ## 适配边界
 
-engine/upstream 的 222 个文件与上游逐字节一致，UPSTREAM.json 包含各文件 SHA-256。适配位于 engine/worker.mjs、renderer.mjs、management.mjs，以及 Python services/、main.py；没有在原版业务文件里散布框架改动。
+engine/upstream 的 225 个文件与上游逐字节一致，UPSTREAM.json 包含各文件 SHA-256。适配位于 engine/worker.mjs、renderer.mjs、management.mjs，以及 Python services/、main.py。runtime.py 在运行目录应用有锚点检查的部署依赖和错误提示补丁，不修改归档的上游源码。
 
 首次启动把受跟踪源码复制到 plugin_data 下的运行目录，建立 lib/puppeteer、lib/common、plugins/other/update 适配入口。源码更新只覆盖清单中的文件，保留 data、config/config、server、server-im。插件安装目录中不存放用户登录态。
 
@@ -38,3 +38,5 @@ python scripts/stage_upstream.py --checkout /path/to/GloryOfKings-Plugin --stage
 原版 test/authPool.test.mjs 依赖作者本机 data/AuthPool.json，部分 sandbox 清单也引用公开仓库中不存在的文件。不要为跑测试索要作者凭据；本适配提供合成账号的等价回归验证。
 
 机器人内 `#王者更新` 用来读取上游最新提交和日志；源码安装通过 AstrBot 的适配包完成。这样可避免上游 Yunzai 更新器把 AstrBot 入口和适配层覆盖掉。没有设置未经用户要求的定时监控或自动升级。
+
+本次 v1.0.6 基准为 813e1d7c490916ed4ed1defb1b14ae03ad41d0d3（2026-09-27）。运行时另加远端凭据明确地址授权，vendor 保持逐字节原样。

@@ -29,6 +29,12 @@
         "permission": "master"
       },
       {
+        "reg": "^#营地消息连接\\s+(\\S+)$",
+        "flags": "",
+        "fnc": "connectRemote",
+        "permission": "master"
+      },
+      {
         "reg": "^#营地消息部署$",
         "flags": "",
         "fnc": "deploy",
@@ -51,6 +57,12 @@
         "reg": "^#营地观战接入\\s+(\\S+)\\s+(\\S+)$",
         "flags": "",
         "fnc": "connect",
+        "permission": "master"
+      },
+      {
+        "reg": "^#营地观战连接\\s+(\\S+)$",
+        "flags": "",
+        "fnc": "connectRemote",
         "permission": "master"
       },
       {

@@ -1,6 +1,6 @@
 import puppeteer from '../../../lib/puppeteer/puppeteer.js'
 import api from '../utils/api.js'
-import { Button, shouldQuote } from '#utils'
+import { getImgType, Button, shouldQuote } from '#utils'
 
 // 元流之子的 5 个分身名字太长，统一用缩写：元法/元射/元辅/元坦/元刺
 const YUAN_ABBR = { 法: '法师', 射: '射手', 辅: '辅助', 坦: '坦克', 刺: '刺客' }
@@ -61,7 +61,7 @@ export class HeroFightingCapacity extends plugin {
             const displayName = simplifyYuan(heroFightingCapacity[0].name)
 
             const img = await puppeteer.screenshot('HeroFightingCapacit', {
-              imgType: 'webp',
+              imgType: getImgType(),
                 tplFile: 'plugins/GloryOfKings-Plugin/resources/html/HeroFightingCapacit.html',
                 photo: heroFightingCapacity[0].photo,
                 name: displayName,

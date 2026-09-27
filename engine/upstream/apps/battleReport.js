@@ -33,6 +33,7 @@ import {
 import { loadPushList, savePushList, mergeSubState, disableSubFlag, subGroups, withSubGroup, withoutSubGroup, sleep, REQUEST_INTERVAL } from '../utils/pushStore.js'
 import { fetchRoleNames } from '../utils/roleName.js'
 import {
+  getImgType,
   resolveCurrentId, getCurrentId, getUserAvatar, Button, shouldQuote, readYamlFile, parsePerfArgs,
   AT_HEAD, stripAtText, resolveTargetUserId, pickGroupSafe, isBlackUser
 } from '#utils'
@@ -204,7 +205,7 @@ export class BattleReport extends plugin {
   async shot (view) {
     try {
       return await puppeteer.screenshot('BattleReport', {
-        imgType: 'webp',
+        imgType: getImgType(),
         tplFile: 'plugins/GloryOfKings-Plugin/resources/html/BattleReport.html',
         // 模板里 CSS / 字体都靠 {{_res_path}} 拼相对路径，漏了这项样式表 404，
         // 出来的是一张没有任何样式的纯文字图（插件里其它 app 也都传这一串）

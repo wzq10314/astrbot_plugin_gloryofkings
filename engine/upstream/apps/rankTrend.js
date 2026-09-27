@@ -23,6 +23,7 @@
 import puppeteer from '../../../lib/puppeteer/puppeteer.js'
 import path from 'path'
 import {
+  getImgType,
   resolveCurrentId, readYamlFile, Button, shouldQuote, getUserAvatar,
   AT_HEAD, stripAtText, resolveTargetUserId, resolveMemberName
 } from '#utils'
@@ -125,7 +126,7 @@ export class RankTrend extends plugin {
   async shot (view) {
     try {
       return await puppeteer.screenshot('RankTrend', {
-        imgType: 'webp',
+        imgType: getImgType(),
         tplFile: 'plugins/GloryOfKings-Plugin/resources/html/RankTrend.html',
         // 模板里 CSS / 字体都靠 {{_res_path}} 拼相对路径，漏了这项样式表 404，
         // 出来的是一张没有任何样式的纯文字图

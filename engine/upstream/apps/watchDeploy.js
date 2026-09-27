@@ -27,11 +27,13 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { PluginPath, PluginName, Config } from '#components'
 import { shouldQuote } from '#utils'
-import { pm2, pm2Proc, pm2Bin, resetPm2Cache, isOurProcess } from '../utils/pm2.js'
+import { pm2, pm2Proc, resetPm2Cache, isOurProcess } from '../utils/pm2.js'
 import {
   installPackage, fetchPackageMeta, probeStatus, waitStatus, fmtUptime,
   normalizeBase, STATE_FILE
 } from '../utils/deploy.js'
+import { ensureDependencies } from '../utils/dependency.js'
+import { probeRemoteStatus, reportRemoteAccounts } from '../utils/remoteAccounts.js'
 
 /** 云崽根目录（插件住在 `<根>/plugins/<名字>`，往上两级）—— 只为把路径显示得短一点 */
 const YunzaiRoot = path.resolve(PluginPath, '../..')
@@ -46,8 +48,20 @@ const PKG_NAME = 'watch'
 const PROC_NAME = 'gok-watch'
 const DEFAULT_PORT = 8899
 
-/** 引导语：没配分发服务时统一用这句 */
-const GROUP_HINT = '进群 972915804 找主人要部署地址和令牌，然后发 #营地观战接入 <地址> <令牌>'
+function watchEnv () {
+  const url = String(cfg().watchCdnHttps || '').trim().replace(/\/+$/, '')
+  return { GOK_WATCH_CDN_HTTPS: url }
+}
+
+/**
+ * 引导语：没配分发服务时统一用这句。
+ *
+ * ⚠️ 把**锅巴那条路也写上**：群里发指令要带地址和令牌，令牌是凭证、贴群里就泄了；
+ * 而锅巴是网页表单，填进去更稳妥。两条路等价，写全了对方才知道可以不发指令。
+ */
+const GROUP_HINT =
+  '进群 972915804 找主人要部署地址和令牌，然后发 #营地观战接入 <地址> <令牌>；' +
+  '也可以在锅巴「王者荣耀 → 服务端接入」里填「分发服务地址」和「接入令牌」，一样能接入'
 
 /**
  * 装完必须齐活的文件。少一个，服务端要么起不来、要么悄悄退化成简版页
@@ -121,6 +135,11 @@ export class WatchDeploy extends plugin {
         // 一步到位：写配置 + 立刻部署。主人和群友用的是同一条
         // （群友装了这个插件之后，在他自己那台机器人上就是主人）
         { reg: '^#营地观战接入\\s+(\\S+)\\s+(\\S+)$', fnc: 'connect', permission: 'master' },
+        // ⭐ 连**别人已经部署好的**观战服务：只填地址，本机不下载、不部署。
+        //    ⚠️ 和上面那条是两条完全不同的路，别混：
+        //      · 接入 = 在自己机器上装一套（地址是**分发服务**）
+        //      · 连接 = 用别人跑着的那一套（地址是**观战服务**本身）
+        { reg: '^#营地观战连接\\s+(\\S+)$', fnc: 'connectRemote', permission: 'master' },
         { reg: '^#营地观战部署$', fnc: 'deploy', permission: 'master' },
         { reg: '^#营地观战服务$', fnc: 'status', permission: 'master' }
       ]
@@ -167,23 +186,87 @@ export class WatchDeploy extends plugin {
     return this.deploy(e, { adopted: true })
   }
 
+  /* -------------------------------------------------------- 连远端 */
+
+  /**
+   * `#营地观战连接 <地址>` —— 用**别人已经部署好的**观战服务。
+   *
+   * 和「接入」是两条完全不同的路：
+   *   · `#营地观战接入 <分发地址> <令牌>` = 从分发服务下代码，在**本机**装一套
+   *   · `#营地观战连接 <观战地址>` = 直接用别人跑着的那一套，本机什么都不装
+   *
+   * ⚠️ 连远端之后本机**不需要** pm2 / ffmpeg / 开端口，也不会有任何本机进程：
+   *    取流、轮询、转码全在对方那台机器上跑（代价是画面要经对方中转，且对方能看到
+   *    你的营地账号 —— 只连信得过的部署方）。
+   *
+   * ⚠️ 对方的服务端必须能**收下你的账号**：观战取流认的是「加了这个好友的那个号」，
+   *    而登录态只在**你这台机器**上（对方的 AuthPool.json 里没有）。
+   *    所以这里会把你的全局账号递过去（只进对方内存、**不在对方落盘**）。
+   *    对方要是老版本、没这个口子，这里会明确提示要更新。
+   */
+  async connectRemote (e) {
+    const m = /^#营地观战连接\s+(\S+)$/.exec(String(e.msg || '').trim())
+    if (!m) return e.reply('格式：#营地观战连接 <地址>', shouldQuote())
+
+    const url = normalizeBase(m[1])
+
+    if (!/^https?:\/\//i.test(url)) {
+      return e.reply('地址要以 http:// 或 https:// 开头', shouldQuote())
+    }
+
+    // 先试连再落盘 —— 地址写错了要当场知道
+    const probe = await probeRemoteStatus(url)
+    if (!probe.ok) {
+      return e.reply(`${probe.message}\n地址核对一下再发一次`, shouldQuote())
+    }
+
+    Config.modify('config', 'watchApiUrl', url)
+    // ⚠️ 「直播间对外地址」也得跟着指过去 —— 它才是拼给群友点的那个链接
+    //    （见 watchBattle.js 的 publicBase，空时回退到服务地址）。
+    //    不一起改的话，链接还指着本机/上一个服务：本机根本没在播对方那台机器上的那一场，
+    //    群友点开就是白屏。这是「切了服务端但链接没跟过去」最容易踩的一个坑。
+    Config.modify('config', 'watchPublicUrl', url)
+    logger.mark(`[${PluginName}] 已连接远端观战服务：${url}`)
+
+    // 把自己的账号递过去：对方池子里还没有它们，不递就是「登录成功却查不到好友」
+    const report = await reportRemoteAccounts(url, { force: true })
+
+    const lines = ['✅ 已连接这个观战服务', '', `对方池子里的账号：${probe.accounts} 个`]
+    if (!report.ok) {
+      lines.push(
+        '',
+        '⚠️ 你的登录态没送过去 —— 对方的服务端可能还没更新。',
+        '让那台机器的主人发一次 #营地观战部署 更新后，再发一遍本条指令'
+      )
+    }
+    lines.push(
+      '',
+      '⚠️ 直播间链接也跟着指到这个地址了。群友点不开的话，让对方给一个外网能访问的地址，',
+      '填进锅巴「王者荣耀 → 营地观战」里的「直播间对外地址」'
+    )
+    lines.push('', '看谁在打：发 #营地观战')
+    return e.reply(lines.join('\n'), shouldQuote())
+  }
+
   /* -------------------------------------------------------- 部署 */
 
   async deploy (e, { adopted = false } = {}) {
-    if (!pm2Bin()) {
-      return e.reply(
-        '没找到 pm2，先装一个再部署：npm i -g pm2\n' +
-        '（装完如果还报找不到，重启一下云崽让它认出新的 PATH）',
-        shouldQuote()
-      )
-    }
-
     const { url, token } = distConfig()
     if (!url || !token) {
       return e.reply(
         adopted
           ? '配置没写进去，重发一次试试'
           : `还没接入分发服务。${GROUP_HINT}`,
+        shouldQuote()
+      )
+    }
+
+    await e.reply('正在检查部署依赖（pm2 / ffmpeg），缺少时会自动安装…', shouldQuote())
+    const dependency = await ensureDependencies({ needFfmpeg: true, cfg: cfg(), logger })
+    if (!dependency.ok) {
+      return e.reply(
+        `依赖环境没准备好：${dependency.messages.join('；')}\n` +
+        '也可以在锅巴「王者荣耀 → 服务端接入」里配置依赖镜像/代理后重试',
         shouldQuote()
       )
     }
@@ -246,13 +329,13 @@ export class WatchDeploy extends plugin {
 
       // 已经在跑 = 大概率是更新完代码要重启才生效，所以这里是 restart 而不是拒绝
       const startup = restarting
-        ? pm2(['restart', PROC_NAME, '--update-env'], { timeout: 60000 })
+        ? pm2(['restart', PROC_NAME, '--update-env'], { timeout: 60000, env: { ...watchEnv(), GOK_FFMPEG: dependency.ffmpeg } })
         : pm2([
             'start', ENTRY_FILE,
             '--name', PROC_NAME,
             '--interpreter', 'node',
             '--cwd', SERVER_DIR
-          ], { timeout: 60000 })
+          ], { timeout: 60000, env: { ...watchEnv(), GOK_FFMPEG: dependency.ffmpeg } })
 
       if (!startup.ok) {
         throw new Error(`pm2 ${restarting ? '重启' : '启动'}失败：${startup.err || startup.out || '未知原因'}`)

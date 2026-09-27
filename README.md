@@ -4,7 +4,7 @@
 
 GloryOfKings-Plugin 的 AstrBot 适配版
 
-![Version](https://img.shields.io/badge/version-1.0.4-blue)
+![Version](https://img.shields.io/badge/version-1.0.6-blue)
 ![AstrBot](https://img.shields.io/badge/AstrBot-4.28.1%2B-purple)
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
 ![OneBot](https://img.shields.io/badge/OneBot11-NapCat-green)
@@ -15,9 +15,9 @@ GloryOfKings-Plugin 的 AstrBot 适配版
 
 </div>
 
-这是基于 [longhengmu/GloryOfKings-Plugin](https://gitee.com/longhengmu/GloryOfKings-Plugin) 的完整业务核心适配项目。保留原版 **40 个模块、101 条命令路由、32 份 HTML 模板**，通过常驻 Node 核心对接 AstrBot 的消息、权限、数据目录及后台任务。另补充 AstrBot 管理命令和 `glory_of_kings` LLM 工具。
+这是基于 [longhengmu/GloryOfKings-Plugin](https://gitee.com/longhengmu/GloryOfKings-Plugin) 的完整业务核心适配项目。保留原版 **41 个模块、105 条命令路由、32 份 HTML 模板**，通过常驻 Node 核心对接 AstrBot 的消息、权限、数据目录及后台任务。另补充 AstrBot 管理命令和 `glory_of_kings` LLM 工具。
 
-本版基准提交：[`86ac5b675163`](https://gitee.com/longhengmu/GloryOfKings-Plugin/commit/86ac5b6751630eadb34719aa2a56591c53767e0e)，提交时间 2026-09-22，检出时间 2026-09-24。后续更新、问题修复以此仓库的提交为上游依据。
+本版基准提交：[`813e1d7c4909`](https://gitee.com/longhengmu/GloryOfKings-Plugin/commit/813e1d7c490916ed4ed1defb1b14ae03ad41d0d3)，同步于 2026-09-27。后续更新、问题修复以此仓库的提交为上游依据。
 
 > 观战直播、营地消息及共享库的客户端已接入。它们所需的服务端由上游作者单独分发，不包含在公开仓库中，需自行取得服务地址和接入令牌。本包没有伪造接口或附送私人密钥。真实游戏查询需要有效的营地登录态，并受上游接口权限、隐私设置及频控影响。
 
@@ -25,7 +25,7 @@ GloryOfKings-Plugin 的 AstrBot 适配版
 
 仓库地址：[https://github.com/wzq10314/astrbot_plugin_gloryofkings](https://github.com/wzq10314/astrbot_plugin_gloryofkings)。可在 AstrBot 插件管理中使用该 Git 仓库地址安装，或从 [Releases](https://github.com/wzq10314/astrbot_plugin_gloryofkings/releases) 下载 ZIP。
 
-1. 在 AstrBot 后台的插件管理中上传 `astrbot_plugin_gloryofkings-v1.0.4.zip`，然后启用插件。
+1. 在 AstrBot 后台的插件管理中上传 `astrbot_plugin_gloryofkings-v1.0.6.zip`，然后启用插件。
 2. 环境需要 **Python 3.12、Node.js 22+、npm**。Python 依赖随安装包安装，Node 依赖首次启动自动准备。已安装 RConsole 的机器可以复用系统 Node 和 Chromium；两个插件的数据、账号和依赖目录独立。
 3. 管理员私聊机器人发送 `#王者依赖状态`。浏览器就绪的判断包含一次真实启动和截图。未就绪时可发 `#王者浏览器安装`，依赖安装失败时可发 `#王者依赖安装`。
 4. 先发 `#王者帮助` 检查图片，再按下方步骤登录和绑定。
@@ -158,6 +158,8 @@ GloryOfKings-Plugin 的 AstrBot 适配版
 
 ## 验证范围
 
+v1.0.6 通过 33 项 Python 回归、19 项 Node 渲染/存储断言、8 项大神对局池断言及远端授权/IM 错误测试，详见 [验证记录](docs/VALIDATION-v1.0.6.md)。
+
 v1.0.3 通过 30 项 Python 集成测试和 14 项 Node 渲染/存储断言：包括完整模块加载、权限、持久化、LLM 路由、真实帮助图片、真实 canvas 趋势图、扫码浏览器会话隔离、账号归属及消息去重。
 
 测试使用虚拟 OneBot 传输及模拟游戏数据，**本地测试未使用真实游戏账号扫码，也未取得作者私有服务进行端到端验证**。外部接口变化需结合实际运行结果继续修复。上游自带部分测试依赖作者未公开的本地文件，本项目提供了不需要私人账号的替代回归测试。
@@ -171,7 +173,22 @@ v1.0.3 通过 30 项 Python 集成测试和 14 项 Node 渲染/存储断言：�
 遵循并保留上游 MIT 许可证。王者荣耀、王者营地及相关游戏美术资源属于各自权利人；本项目不是腾讯官方产品。
 
 
-v1.0.4 是 IM 发送失败诊断更新，已通过独立错误分类与脱敏测试；本次完整 Python 回归因本地依赖读取权限未完成。更新后无需重新部署 IM 服务，重载插件即可生效。
 
 
 维护者实机反馈：观战页面转发可达，IM 能接收消息；发送出现 -30003 后，按登录态排查流程处理已恢复。此为用户环境反馈，不代表全部接口已完成实机验收。
+
+## v1.0.6 同步说明
+
+- 同步上游部署依赖检查、私聊回执校验和观战链接改进。
+- 图片格式可在后台 `imgType` 选择 `jpeg`、`png` 或 `webp`。
+- `dependencyRegistry` / `dependencyProxy` 用于服务部署依赖下载；原有 `engine_npm_registry` 继续用于核心安装。
+- `watchCdnHttps` 为可选 HTTPS 转发地址，需要服务提供者支持；配置后需重启/重新部署观战服务才能传入新环境变量。
+- 保留营地消息仅限私聊、账号归属校验、错误详情脱敏和服务依赖自动补装。共享库仍默认关闭。
+- 更新插件保留独立数据目录中的账号与已部署服务。服务端本体由作者另行分发，更新插件不会自动替换正在运行的服务端。
+
+## 2026-09-27 更新：远端观战与推送
+
+- 同步指定上游 `813e1d7c4909`，加入「#观战大神」和远端服务连接，修复战绩订阅轮询、空订阅及推送批次处理。
+- `#营地观战连接 地址`、私聊 `#营地消息连接 地址` 可连接已有服务。管理员须先在后台「允许接收营地登录凭据的远端地址」添加完整地址；默认列表为空，不向远端发送登录态。服务地址改变后需要重新添加。
+- 远端服务会接收全部全局营地账号的登录凭据，必须由你控制或信任。插件拒绝凭据上传请求的 HTTP 重定向。原本同机 `127.0.0.1` 部署无需此设置。
+- 外置观战/IM 服务仍由原作者分发，插件源码更新不会自动更新正在运行的服务进程。

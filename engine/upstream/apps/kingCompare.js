@@ -17,6 +17,7 @@
 import puppeteer from '../../../lib/puppeteer/puppeteer.js'
 import path from 'path'
 import {
+  getImgType,
   ApiService, resolveCurrentId, readYamlFile, Button, shouldQuote,
   AT_HEAD, stripAtText, pickAtText, resolveMemberName
 } from '#utils'
@@ -193,7 +194,7 @@ export class KingCompare extends plugin {
   async shot (a, b) {
     try {
       return await puppeteer.screenshot('KingCompare', {
-        imgType: 'webp',
+        imgType: getImgType(),
         tplFile: 'plugins/GloryOfKings-Plugin/resources/html/KingCompare.html',
         // 模板的 CSS / 字体都靠 {{_res_path}} 拼相对路径，漏了这项样式表 404，出的是纯文字图
         _res_path: '../../../plugins/GloryOfKings-Plugin/resources/',

@@ -29,7 +29,7 @@
  */
 import path from 'node:path'
 import { PluginName, PluginPath } from '#components'
-import { shouldQuote, getCurrentId } from '#utils'
+import { getImgType, shouldQuote, getCurrentId } from '#utils'
 import * as client from '../utils/campImClient.js'
 import * as store from '../utils/campImStore.js'
 import authStore from '../utils/authStore.js'
@@ -168,7 +168,7 @@ export class CampFriend extends plugin {
         //    跟全项目其他模板的做法也不一致（照抄 WatchBattle）。
         tplFile: path.join(PluginPath, 'resources', 'html', 'campFriend.html'),
         _res_path: '../../../plugins/GloryOfKings-Plugin/resources/',
-        imgType: 'webp',
+        imgType: getImgType(),
         friends: rows,
         total: res.total || 0,
         more,

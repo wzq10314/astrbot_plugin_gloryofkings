@@ -120,7 +120,7 @@ export function supportGuoba () {
         {
           field: 'config.idleBackoffMax',
           label: '离线退避倍数',
-          bottomHelpMessage: '玩家离线时把检查间隔拉长到几倍上面的轮询间隔。离线的号既不会开局也不会出新战绩，照高频查纯属白耗配额、更容易撞上 -30107。默认 5，即 2 分钟的间隔在离线满 3 小时后退到 10 分钟一次（不活跃 1 小时内 2 倍、1~3 小时 3 倍）。只给 #谁在打游戏 采集、不播报的影子订阅不走这里，他们只在有人查看那份名单时现刷。代价是上线播报最坏晚这么久，期间「上线又下线」的短会话可能整段漏掉。填 1 = 关闭自适应，恒定按上面的间隔轮询。',
+          bottomHelpMessage: '玩家离线时把检查间隔拉长到几倍上面的轮询间隔。离线的号既不会开局也不会出新战绩，照高频查纯属白耗配额、更容易撞上 -30107。默认 5，即 2 分钟的间隔在离线满 3 小时后退到 10 分钟一次（不活跃 1 小时内 2 倍、1~3 小时 3 倍）。代价是上线播报最坏晚这么久，期间「上线又下线」的短会话可能整段漏掉。填 1 = 关闭自适应，恒定按上面的间隔轮询。',
           component: 'InputNumber',
           componentProps: {
             placeholder: '默认 5'
@@ -213,6 +213,24 @@ export function supportGuoba () {
           }
         },
         {
+          field: 'config.dependencyRegistry',
+          label: '依赖 npm 镜像',
+          bottomHelpMessage: '接入观战/营地消息时自动安装缺失依赖，默认使用国内 npm 镜像；留空也会使用默认镜像。',
+          component: 'Input',
+          componentProps: {
+            placeholder: 'https://registry.npmmirror.com'
+          }
+        },
+        {
+          field: 'config.dependencyProxy',
+          label: '依赖安装代理',
+          bottomHelpMessage: '外网安装依赖时使用的 HTTP(S) 代理，例如 http://127.0.0.1:7890；不需要就留空。',
+          component: 'Input',
+          componentProps: {
+            placeholder: 'http://127.0.0.1:7890'
+          }
+        },
+        {
           field: 'config.shareEnabled',
           label: '营地ID共享库',
           bottomHelpMessage:
@@ -272,7 +290,7 @@ export function supportGuoba () {
         {
           field: 'config.watchApiUrl',
           label: '观战服务地址',
-          bottomHelpMessage: '观战要另跑一个后端进程（负责取直播流、录像），插件通过这个地址指挥它。装好它：发一句 #营地观战部署（要先接入分发服务，见上面「服务端接入」那一栏）。换成别的端口改这里即可，不用重启云崽。',
+          bottomHelpMessage: '观战要另跑一个后端进程（负责取直播流、录像），插件通过这个地址指挥它。自己部署：先接入分发服务（见上面「服务端接入」），再发 #营地观战部署；用别人部署好的：直接发 #营地观战连接 <地址>，本机什么都不用装。换地址改这里也行，不用重启云崽。',
           component: 'Input',
           componentProps: {
             placeholder: '默认 http://127.0.0.1:8899'
@@ -281,10 +299,19 @@ export function supportGuoba () {
         {
           field: 'config.watchPublicUrl',
           label: '直播间对外地址',
-          bottomHelpMessage: '发到群里、给群友点开的那个地址。留空 = 用上面的，但 127.0.0.1 只有本机能开，群友点了是白屏 —— 所以部署时一定填成外网能访问的（域名或公网 IP）+ 端口，比如 http://abc.com:8899。注意防火墙/安全组要放行这个端口。⚠️ 必须填 http：营地的直播流只有 http，播放页走 https 会被浏览器当「混合内容」拦掉、画面全黑；也别给这个域名开强制 HTTPS / HSTS。',
+          bottomHelpMessage: '填写群友能访问的地址（域名或公网 IP）和端口，如 http://abc.com:8899，并放行防火墙/安全组对应端口。使用 https 时先配置 HTTPS 反向代理；需要 CDN 直连时，再配置下方「观战 CDN（https）」。',
           component: 'Input',
           componentProps: {
             placeholder: '留空 = 用上面的地址'
+          }
+        },
+        {
+          field: 'config.watchCdnHttps',
+          label: '观战 CDN（https）',
+          bottomHelpMessage: '先按 server/README-CDN-HTTPS.md 部署 Cloudflare Worker，再填 https://cdn.example.com；保存后发 #营地观战部署 生效，清空后也要保存并部署。留空时 https 观众使用本机转发，http 观众仍直连营地 CDN。',
+          component: 'Input',
+          componentProps: {
+            placeholder: 'https://cdn.example.com'
           }
         },
         {
@@ -294,7 +321,7 @@ export function supportGuoba () {
         {
           field: 'config.campImApiUrl',
           label: '营地消息服务地址',
-          bottomHelpMessage: '营地消息要另跑一个后端进程（给每个营地号挂长连接收消息），插件通过这个地址指挥它。装好它：发一句 #营地消息部署（要先接入分发服务，见上面「服务端接入」那一栏）。换成别的端口改这里即可，不用重启云崽。',
+          bottomHelpMessage: '营地消息要另跑一个后端进程（给每个营地号挂长连接收消息），插件通过这个地址指挥它。自己部署：先接入分发服务（见上面「服务端接入」），再发 #营地消息部署；用别人部署好的：直接发 #营地消息连接 <地址>，本机什么都不用装。换地址改这里也行，不用重启云崽。',
           component: 'Input',
           componentProps: {
             placeholder: '默认 http://127.0.0.1:8900'
@@ -395,6 +422,28 @@ export function supportGuoba () {
           component: 'Input',
           componentProps: {
             placeholder: "默认 0 13 5 * * *（秒 分 时 日 月 周）"
+          }
+        },
+        {
+          component: 'Divider',
+          label: '出图'
+        },
+        {
+          field: 'config.imgType',
+          label: '输出图片类型',
+          helpMessage: '插件所有出图指令（战绩 / 主页 / 皮肤墙 / 帮助面板 / 营地消息卡片…）统一用这个格式',
+          bottomHelpMessage:
+            '插件 37 处出图统一读这一项，改完下次出图就生效，不用重启。' +
+            '⚠️ 选 WebP 之前先看你的适配器：微信（ComWeChat）的图片接口不认 webp，' +
+            '会把图降级成「文件」发出去 —— 群友收到的是 xxx.webp 文件卡片而不是图（2026-09-24 实测）。' +
+            'QQ / OneBot 等平台用 webp 能省三成左右体积。拿不准就保持 JPEG。',
+          component: 'Select',
+          componentProps: {
+            options: [
+              { label: 'JPEG（推荐，全平台通用）', value: 'jpeg' },
+              { label: 'PNG（无损，体积最大）', value: 'png' },
+              { label: 'WebP（体积小，微信下会变成文件）', value: 'webp' }
+            ]
           }
         },
         {

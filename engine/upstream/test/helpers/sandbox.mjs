@@ -34,10 +34,13 @@ export const PLUGIN_DIR = path.resolve(
 /** service.js / dist.js 的静态 import 闭包。少一个就 Module Not Found */
 const COPY_FILES = [
   'package.json',
-  'utils/platform.js',
+  // ⚠️ 这里原先还列着 utils/platform.js、utils/dist.js、utils/service.js、
+  //    utils/migrateConfig.js —— 这四个文件**从来没有进过仓库**
+  //    （`git ls-tree 993b991 utils/` 里就没有，当前的 apps/ 与 utils/ 也没有任何
+  //    源码 import 它们），于是 makeSandbox() 在 copyFileSync 处 ENOENT，
+  //    把所有用它做沙箱的测试（authPool / campImDedup）一起带崩。
+  //    当前测试用不到它们，摘掉即可恢复。
   'utils/deploy.js',
-  'utils/dist.js',
-  'utils/service.js',
   // shareStore 的执行期闭包（用它验「地址/令牌的读法，两个消费方一致」）
   'utils/shareStore.js',
   'utils/yamlUtils.js',
@@ -46,8 +49,8 @@ const COPY_FILES = [
   'utils/authStore.js',
   // 营地消息的本地状态（test/campImDedup.test.mjs 用）
   'utils/campImStore.js',
-  // 配置迁移（test/migrateConfig.test.mjs 用）
-  'utils/migrateConfig.js'
+  // 出图格式（test/imageType.test.mjs 用）
+  'utils/imageType.js'
 ]
 
 /** 测试用的假配置。地址/令牌都是假的，绝不碰真凭证 */

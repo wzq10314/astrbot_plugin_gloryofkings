@@ -103,7 +103,7 @@ export function resetPm2Cache () {
  * @param {{timeout?: number}} opts
  * @returns {{ok: boolean, out: string, err: string, missing: boolean}}
  */
-export function pm2 (args = [], { timeout = 120000 } = {}) {
+export function pm2 (args = [], { timeout = 120000, env } = {}) {
   const bin = pm2Bin()
   if (!bin) {
     return {
@@ -118,8 +118,8 @@ export function pm2 (args = [], { timeout = 120000 } = {}) {
 
   const r = needsShell(bin)
     ? spawnSync([bin, ...args].map(quote).join(' '),
-      { shell: true, encoding: 'utf-8', timeout, windowsHide: true })
-    : spawnSync(bin, args, { encoding: 'utf-8', timeout, windowsHide: true })
+      { shell: true, encoding: 'utf-8', timeout, windowsHide: true, env: { ...process.env, ...(env || {}) } })
+    : spawnSync(bin, args, { encoding: 'utf-8', timeout, windowsHide: true, env: { ...process.env, ...(env || {}) } })
 
   return {
     ok: !r.error && r.status === 0,

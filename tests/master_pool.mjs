@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import {pickBattles,pickFromBattles,matchLane} from '../engine/upstream/utils/masterPool.js';
+const rank=Array.from({length:12},(_,i)=>({gameType:4,lane:'打野',battleId:String(i)}));
+const peak=Array.from({length:6},(_,i)=>({gameType:14,lane:'中路',battleId:'p'+i}));
+let result=pickFromBattles([...rank,...peak]);
+assert.equal(result.picked.length,10);
+assert.equal(result.picked.filter(x=>x.gameType===14).length,5);
+assert.equal(pickFromBattles(rank).picked.length,10);
+assert.equal(pickFromBattles([...rank,...peak],{lane:'中路'}).picked.length,6);
+assert.equal(pickFromBattles(rank,{lane:'游走'}).laneMissed,true);
+assert.equal(pickBattles([{tvType:1},{tvType:2,battle:{liveStream:{success:false}}}]).picked.length,0);
+assert.equal(matchLane('打野'), '打野');
+assert.equal(matchLane('不存在'), '');
+console.log('Master battle pool: 8 assertions passed');

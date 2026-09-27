@@ -9,7 +9,7 @@
  * 留空 = 不自动推送，只保留指令。改完需重启（cron 在 constructor 注册）。
  */
 import puppeteer from '../../../lib/puppeteer/puppeteer.js'
-import { Button, shouldQuote, pickGroupSafe } from '#utils'
+import { getImgType, Button, shouldQuote, pickGroupSafe } from '#utils'
 import { Config } from '#components'
 import {
   getSkinCalendar, splitCalendar, formatDate, today, QUALITY_COLOR,
@@ -84,7 +84,7 @@ export class SkinNews extends plugin {
     const { upcoming, todayList, recent } = splitCalendar(list, 8)
 
     const img = await puppeteer.screenshot('SkinNews', {
-      imgType: 'webp',
+      imgType: getImgType(),
       tplFile: 'plugins/GloryOfKings-Plugin/resources/html/SkinNews.html',
       dateText: formatDate(today()),
       pushMode: false,
@@ -152,7 +152,7 @@ export class SkinNews extends plugin {
     let img
     try {
       img = await puppeteer.screenshot('SkinNews', {
-   imgType: 'webp',
+   imgType: getImgType(),
         tplFile: 'plugins/GloryOfKings-Plugin/resources/html/SkinNews.html',
         dateText: formatDate(today()),
         pushMode: true,

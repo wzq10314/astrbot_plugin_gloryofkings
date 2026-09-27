@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import api from '../utils/api.js'
 import {
+  getImgType,
   getLocalImage,
   getPvpSkinCover,
   getPvpHeroSkins,
@@ -238,7 +239,7 @@ export class HeroSkin extends plugin {
         }
 
         const img = await puppeteer.screenshot('HeroSkin', {
-          imgType: 'webp',
+          imgType: getImgType(),
             tplFile: 'plugins/GloryOfKings-Plugin/resources/html/HeroSkin.html',
             heroName: displayName,
             skinCount: skins.length,

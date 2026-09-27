@@ -104,7 +104,7 @@ docker logs --tail 150 astrbot
 
 ## 服务依赖缺失（v1.0.3 起自动处理）
 
-出现 Cannot find package ws 时，更新插件、重载后私聊发送 `#营地消息部署`。接入和部署流程会自动安装依赖，再启动服务；观战部署同样支持。已有服务不会仅因插件更新就自动重启。若网络失败，检查 engine_npm_registry 后重试部署，无需逐个执行 npm install。Node/npm 和 ffmpeg 仍需由宿主提供。
+出现 Cannot find package ws 时，更新插件、重载后私聊发送 `#营地消息部署`。接入和部署流程会自动安装依赖，再启动服务；观战部署同样支持。已有服务不会仅因插件更新就自动重启。若网络失败，检查 dependencyRegistry / dependencyProxy 后重试部署，无需逐个执行 npm install。Node/npm 仍需由宿主提供；观战部署会尝试补装 ffmpeg，系统权限或网络不允许时会给出失败提示。
 
 
 ## IM 能收不能发，错误码 -30003

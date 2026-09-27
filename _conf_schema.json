@@ -235,5 +235,31 @@
     "type": "string",
     "default": "{}",
     "editor_mode": true
+  },
+  "imgType": {
+    "description": "渲染图片格式：jpeg、png 或 webp，默认 jpeg",
+    "type": "string",
+    "default": "jpeg"
+  },
+  "dependencyRegistry": {
+    "description": "上游服务部署使用的 npm 镜像",
+    "type": "string",
+    "default": "https://registry.npmmirror.com"
+  },
+  "dependencyProxy": {
+    "description": "服务部署依赖下载代理，留空不额外配置",
+    "type": "string",
+    "default": ""
+  },
+  "watchCdnHttps": {
+    "description": "可选观战 HTTPS 转发 Worker 地址，由服务提供者提供；留空不启用",
+    "type": "string",
+    "default": ""
+  },
+  "remoteAccountAllowedUrls": {
+    "description": "允许接收营地登录凭据的远端地址",
+    "type": "list",
+    "default": [],
+    "hint": "默认不发送。填写完整服务地址后，允许向该地址同步全部全局营地账号的登录凭据。仅填写自己控制或信任的服务。不同端口或路径需分别填写。"
   }
 }

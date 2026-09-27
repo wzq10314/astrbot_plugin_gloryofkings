@@ -46,9 +46,13 @@ import {
   followGlobalBlack,
   getHostBlackList
 } from './blackList.js'
+import { getImgType } from './imageType.js'
 import { Config } from '#components'
 
 export {
+  // 出图格式（锅巴「输出图片类型」）。37 处出图统一从这里取，别在各 app 里写死 ——
+  // 详见 utils/imageType.js 顶部关于「微信下 webp 会变成文件」的说明
+  getImgType,
   ApiService,
   readJsonFile,
   writeJsonFile,

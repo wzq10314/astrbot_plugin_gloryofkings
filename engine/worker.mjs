@@ -70,7 +70,7 @@ function party(kind,id){
   }
   return p;
 }
-globalThis.Bot={uin:Number(initial.self_id),gl:new Map(),gml:new Map(),
+globalThis.Bot={adapter:{name:'OneBotv11'},uin:Number(initial.self_id),gl:new Map(),gml:new Map(),
   pickGroup:id=>party('group',id),pickFriend:id=>party('private',id),pickUser:id=>party('private',id),
   sendApi:api,recallMsg:message_id=>api('delete_msg',{message_id}),getMsg:message_id=>api('get_msg',{message_id}),
   makeForwardMsg:async rows=>({type:'forward',rows}),

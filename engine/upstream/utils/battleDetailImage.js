@@ -14,6 +14,7 @@ import path from 'path'
 import puppeteer from '../../../lib/puppeteer/puppeteer.js'
 import { PluginPath } from '#components'
 import ApiService from './api.js'
+import { getImgType } from './imageType.js'
 
 // 评价图标分两套，同一场高分局会同时下发：
 //   分路评价 —— custom_wzry_battledetail_tags/<md5>.png，198×48 长条，图上直接印着「档位 + 分路」
@@ -304,7 +305,7 @@ export async function renderBattleDetail ({ head, battle, redTeam, blueTeam, red
   }
 
   return puppeteer.screenshot('QueryGameRecordDetails', {
-    imgType: 'webp',
+    imgType: getImgType(),
     tplFile: 'plugins/GloryOfKings-Plugin/resources/html/QueryGameRecordDetails.html',
     gameResult: head.gameResult ? '胜利' : '失败',
     gameResultEn: head.gameResult ? 'VICTORY' : 'DEFEAT',

@@ -1,6 +1,6 @@
 import path from 'path'
 import puppeteer from '../../../lib/puppeteer/puppeteer.js'
-import { ApiService, readYamlFile, Button, parsePerfArgs, seasonNo, AT_HEAD, stripAtText, resolveTargetUserId, resolveUserData, shouldQuote } from '#utils'
+import { getImgType, ApiService, readYamlFile, Button, parsePerfArgs, seasonNo, AT_HEAD, stripAtText, resolveTargetUserId, resolveUserData, shouldQuote } from '#utils'
 import { PluginData, PluginPath } from '#components'
 import { loadArchive } from '../utils/battleArchive.js'
 import { buildDailyTrend } from '../utils/scoreTrend.js'
@@ -167,7 +167,7 @@ export class PeakPerformance extends plugin {
       : '—'
 
     const img = await puppeteer.screenshot('PeakPerformance', {
-      imgType: 'webp',
+      imgType: getImgType(),
       tplFile: 'plugins/GloryOfKings-Plugin/resources/html/PeakPerformance.html',
       _res_path: '../../../plugins/GloryOfKings-Plugin/resources/',
       roleName,
@@ -292,7 +292,7 @@ export class PeakPerformance extends plugin {
     ]
 
     const img = await puppeteer.screenshot('PeakPerformance', {
-      imgType: 'webp',
+      imgType: getImgType(),
       tplFile: 'plugins/GloryOfKings-Plugin/resources/html/PeakPerformance.html',
       _res_path: '../../../plugins/GloryOfKings-Plugin/resources/',
       roleName,

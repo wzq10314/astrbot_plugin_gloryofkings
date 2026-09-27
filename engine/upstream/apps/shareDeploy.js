@@ -28,7 +28,6 @@ import {
   querySharedBind, AT_HEAD,
   stripAtText, pickAtText, resolveTargetUserId, resolveMemberName
 } from '#utils'
-import { sendMaster } from '../utils/masterMsg.js'
 import { sendPrivate } from '../utils/privateMsg.js'
 
 /** 云崽根目录（插件住在 `<根>/plugins/<名字>`，往上两级） */
@@ -179,11 +178,11 @@ export class ShareDeploy extends plugin {
   async replySafely (e, text, { hint } = {}) {
     if (!e.isGroup) return e.reply(text, shouldQuote())
 
-    const delivered = await sendMaster(text)
+    const { ok: delivered } = await sendPrivate(e.user_id, text, { bot: e.bot, groupId: e.group_id })
     await e.reply(
       delivered
         ? (hint || '结果不太方便发在群里，已经私聊发你了')
-        : '⚠️ 私聊发不出去（机器人可能没加你好友），改成私聊我再来一次吧',
+        : '请私聊我再发一次这条指令',
       shouldQuote()
     )
     return undefined
@@ -264,7 +263,9 @@ export class ShareDeploy extends plugin {
       const steps = [
         `#营地共享库地址 ${apiUrl}`,
         `#营地共享库令牌 ${created.token}`,
-        '#接入营地共享库'
+        '#接入营地共享库',
+        '',
+        '也可发 #锅巴登录，打开登录链接，进入「插件配置 → 王者荣耀 → 服务端接入」，填写「接入令牌」；填写「共享库地址」，打开「营地ID共享库」开关并保存。'
       ]
 
       const ownerText = [
@@ -272,7 +273,7 @@ export class ShareDeploy extends plugin {
         '',
         created.token,
         '',
-        '把下面三行整段发给对方，让 TA 在自己的机器人上依次发出来：',
+        '把下面三行整段发给对方，让 TA 私聊自己的机器人依次发送：',
         ...steps,
         '',
         configured
@@ -287,20 +288,20 @@ export class ShareDeploy extends plugin {
         const sent = await sendPrivate(target.userId, [
           `🔑 「${label}」的营地ID共享库接入信息（只发这一次，别弄丢）`,
           '',
-          '在你的机器人上依次发这三行就行：',
+          '私聊你的机器人，依次发这三行：',
           ...steps
-        ].join('\n'), { bot: e.bot })
+        ].join('\n'), { bot: e.bot, groupId: e.group_id })
 
         if (sent.ok) {
-          logger.mark(`[${PluginName}] 共享库令牌已私聊给 ${target.userId}：${label}`)
+          logger.mark(`[${PluginName}] 共享库令牌已私聊给 ${target.userId}（${sent.via}）：${label}`)
           return e.reply(`已经把「${label}」的令牌私聊发给 ${target.name} 了`, shouldQuote())
         }
 
         logger.mark(`[${PluginName}] 私聊 ${target.userId} 失败（${sent.reason}），令牌改发主人：${label}`)
-        const delivered = await sendMaster(ownerText)
+        const { ok: delivered } = await sendPrivate(e.user_id, ownerText, { bot: e.bot, groupId: e.group_id })
         return e.reply(
           delivered
-            ? `私聊给 ${target.name} 没发出去（TA 多半没开临时会话），令牌已经私聊发给你了，你转给 TA 吧`
+            ? `私聊给 ${target.name} 未确认发送成功，令牌已经私聊发给你了，你转给 TA 吧`
             : `私聊给 ${target.name} 发不出去，你的私聊也没成功。你私聊我发一次这条指令，我把令牌发你`,
           shouldQuote()
         )
@@ -315,7 +316,7 @@ export class ShareDeploy extends plugin {
       })
     } catch (error) {
       logger.error(`[${PluginName}] 签发共享库令牌失败：${error?.message || error}`)
-      return e.reply(`签发失败：${error?.message || error}`, shouldQuote())
+      return e.reply('签发或发送失败，请私聊我再试一次', shouldQuote())
     }
   }
 

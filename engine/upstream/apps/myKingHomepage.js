@@ -1,6 +1,6 @@
 import puppeteer from '../../../lib/puppeteer/puppeteer.js'
 import common from '../../../lib/common/common.js'
-import { ApiService, readYamlFile, Button, AT_HEAD, AT_TAIL, stripAtText, resolveTargetUserId, resolveUserData, shouldQuote } from '#utils'
+import { getImgType, ApiService, readYamlFile, Button, AT_HEAD, AT_TAIL, stripAtText, resolveTargetUserId, resolveUserData, shouldQuote } from '#utils'
 import path from 'path'
 import { PluginData, PluginPath } from '#components'
 import moment from 'moment'
@@ -192,7 +192,7 @@ export class MyKingHomepage extends plugin {
         const isOffline = gameOnline === '离线'
         const honor = isKing ? 'honor' : 'roleJob'
         const data = {
-          imgType: 'webp',
+          imgType: getImgType(),
           tplFile: 'plugins/GloryOfKings-Plugin/resources/html/MyKingHomepage.html',
           _res_path: '../../../plugins/GloryOfKings-Plugin/resources/',
           roleIcon,

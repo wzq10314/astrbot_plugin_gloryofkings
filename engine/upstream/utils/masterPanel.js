@@ -1,6 +1,7 @@
 import puppeteer from '../../../lib/puppeteer/puppeteer.js'
 import { Config } from '#components'
 import authStore from './authStore.js'
+import { getImgType } from './imageType.js'
 
 function maskId(value, keepStart = 3, keepEnd = 3) {
   const text = String(value || '')
@@ -75,7 +76,7 @@ export function buildMasterPanelData() {
 
 export async function renderMasterPanel(e) {
   const panelImage = await puppeteer.screenshot('helpConfig', {
-    imgType: 'webp',
+    imgType: getImgType(),
     tplFile: 'plugins/GloryOfKings-Plugin/resources/html/helpConfig.html',
     _res_path: '../../../plugins/GloryOfKings-Plugin/resources/',
     ...buildMasterPanelData()

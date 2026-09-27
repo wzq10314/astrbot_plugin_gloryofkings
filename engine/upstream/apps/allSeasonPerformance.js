@@ -1,6 +1,6 @@
 import path from 'path'
 import puppeteer from '../../../lib/puppeteer/puppeteer.js'
-import { ApiService, readYamlFile, Button, parsePerfArgs, AT_HEAD, stripAtText, resolveTargetUserId, resolveUserData, shouldQuote } from '#utils'
+import { getImgType, ApiService, readYamlFile, Button, parsePerfArgs, AT_HEAD, stripAtText, resolveTargetUserId, resolveUserData, shouldQuote } from '#utils'
 import { PluginData, PluginPath } from '#components'
 import { privacyScope } from '../utils/seasonFallback.js'
 
@@ -121,7 +121,7 @@ export class AllSeasonPerformance extends plugin {
 
     const hc = data.headCard || {}
     const img = await puppeteer.screenshot('AllSeasonPerformance', {
-      imgType: 'webp',
+      imgType: getImgType(),
       tplFile: 'plugins/GloryOfKings-Plugin/resources/html/AllSeasonPerformance.html',
       _res_path: '../../../plugins/GloryOfKings-Plugin/resources/',
       mode,

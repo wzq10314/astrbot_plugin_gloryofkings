@@ -69,10 +69,18 @@ class Integration(unittest.IsolatedAsyncioTestCase):
 
     async def test_inventory_loads_all_upstream_apps_and_schedules(self):
         self.assertEqual(len(self.bridge.inventory),41)
-        self.assertEqual(sum(len(a['rules']) for a in self.bridge.inventory),103)
+        self.assertEqual(sum(len(a['rules']) for a in self.bridge.inventory),105)
         self.assertGreaterEqual(self.bridge.jobs,9)
         for app in self.bridge.inventory:
             self.assertTrue(app['rules'])
+
+    async def test_remote_connection_requires_explicit_endpoint_approval(self):
+        for command in ('#营地观战连接 https://example.invalid', '#营地消息连接 https://example.invalid'):
+            _, calls = await self.command(command, user='12345002', master=True)
+            self.assertIn('允许接收营地登录凭据', json.dumps(calls, ensure_ascii=False))
+        config = yaml.safe_load((self.bridge.root/'plugins/GloryOfKings-Plugin/config/config/config.yaml').read_text(encoding='utf-8'))
+        self.assertEqual(config['watchApiUrl'], 'http://127.0.0.1:8899')
+        self.assertEqual(config['campImApiUrl'], 'http://127.0.0.1:8900')
 
     async def test_normal_chat_and_unknown_quotes_not_claimed(self):
         self.assertFalse(await self.bridge.request('match',event('你好')))
@@ -103,12 +111,12 @@ class Integration(unittest.IsolatedAsyncioTestCase):
         store=yaml.safe_load(file.read_text(encoding='utf-8'))
         self.assertEqual(len(store.get('12345001',store.get(12345001))['ids']),1)
 
-    async def test_help_renders_real_png_and_cross_container_send(self):
+    async def test_help_renders_real_jpeg_and_cross_container_send(self):
         _,calls=await self.command('#王者帮助 账号')
         images=[s for action,p in calls if action.startswith('send_') for s in p.get('message',[]) if s['type']=='image']
         self.assertTrue(images,'help must render, not silently use text fallback')
         data=base64.b64decode(images[0]['data']['file'].removeprefix('base64://'))
-        self.assertTrue(data.startswith(b'\x89PNG\r\n'))
+        self.assertTrue(data.startswith(b'\xff\xd8\xff'))
         self.assertGreater(len(data),20000)
         out=os.environ.get('GOK_PREVIEW')
         if out:Path(out).write_bytes(data)
@@ -161,6 +169,22 @@ class Integration(unittest.IsolatedAsyncioTestCase):
 
 
 class Runtime(unittest.TestCase):
+    def test_updated_deploy_hooks_and_opt_in_settings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            settings=yaml.safe_load((ROOT/'config.yaml').read_text(encoding='utf-8'))
+            for _ in range(2):
+                target=runtime_module.prepare_runtime(ROOT/'engine',Path(tmp),settings)
+                im=(target/'apps/campImDeploy.js').read_text(encoding='utf-8')
+                self.assertNotIn('needWs: true',im)
+                self.assertEqual(im.count("gok.call('server_dependencies'"),1)
+                watch=(target/'apps/watchDeploy.js').read_text(encoding='utf-8')
+                self.assertIn('GOK_WATCH_CDN_HTTPS',watch)
+                self.assertEqual(watch.count("gok.call('server_dependencies'"),1)
+                cfg=yaml.safe_load((target/'config/config/config.yaml').read_text(encoding='utf-8'))
+                self.assertFalse(cfg['shareEnabled'])
+                self.assertEqual(cfg['shareApiUrl'],'')
+                self.assertEqual(cfg['imgType'],'jpeg')
+
     def test_reload_preserves_command_settings_and_data(self):
         with tempfile.TemporaryDirectory() as tmp:
             dest=Path(tmp)

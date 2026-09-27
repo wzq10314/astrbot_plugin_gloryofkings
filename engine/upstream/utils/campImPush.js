@@ -27,6 +27,7 @@ import { addRef, setLastPush, getLastPush as storeGetLastPush } from './campImSt
 import { sendMaster } from './masterMsg.js'
 import { qlogoUrl } from './avatar.js'
 import puppeteer from '../../../lib/puppeteer/puppeteer.js'
+import { getImgType } from './imageType.js'
 
 // ⚠️ `segment` 是云崽的全局变量（lib/plugins/loader.js 里 global.segment = segment），
 //    不能从 #components import —— 本仓库其他文件（如 apps/heroDetail.js）也是直接用全局的。
@@ -113,7 +114,7 @@ async function renderCard (card) {
       // 见 apps/campFriend.js 的说明：_res_path 是「从 temp/html/<name>/ 回到 resources」的相对路径
       tplFile: path.join(PluginPath, 'resources', 'html', 'campImMsg.html'),
       _res_path: '../../../plugins/GloryOfKings-Plugin/resources/',
-      imgType: 'webp',
+      imgType: getImgType(),
       avatar: card.image || '',
       name: card.name || '营地好友',
       sub: card.sub || '',

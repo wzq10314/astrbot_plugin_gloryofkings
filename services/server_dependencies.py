@@ -51,7 +51,10 @@ class ServerDependencies:
                 env = {**os.environ, 'npm_config_update_notifier': 'false',
                        'npm_config_fetch_retries': '1', 'npm_config_fetch_timeout': '30000'}
                 env['PATH'] = str(Path(node).parent)+os.pathsep+env.get('PATH','')
-                registry = str(self.settings.get('engine_npm_registry','')).strip()
+                registry = str(self.settings.get('dependencyRegistry') or self.settings.get('engine_npm_registry','')).strip()
+                proxy = str(self.settings.get('dependencyProxy') or '').strip()
+                if proxy:
+                    env.update(HTTP_PROXY=proxy, HTTPS_PROXY=proxy, npm_config_proxy=proxy, npm_config_https_proxy=proxy)
                 flags = ['--ignore-scripts', '--no-audit', '--no-fund']
                 if registry: flags += ['--registry', registry]
                 # A shipped lock is authoritative. An omitted ws is added separately.

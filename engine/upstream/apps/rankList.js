@@ -1,6 +1,6 @@
 import path from 'path'
 import puppeteer from '../../../lib/puppeteer/puppeteer.js'
-import { readYamlFile, Button, getUserAvatar, shouldQuote } from '#utils'
+import { getImgType, readYamlFile, Button, getUserAvatar, shouldQuote } from '#utils'
 import { collectRankData, buildRankList, getAllBindings, dedupeTargets, readSnapshot, SNAPSHOT_TTL } from '../utils/rankStore.js'
 import { estimateRequestSeconds } from '../utils/api.js'
 import { PluginData } from '#components'
@@ -147,7 +147,7 @@ export class RankList extends plugin {
     const img = await puppeteer.screenshot('RankList', {
       tplFile: 'plugins/GloryOfKings-Plugin/resources/html/RankList.html',
       _res_path: '../../../plugins/GloryOfKings-Plugin/resources/',
-      imgType: 'webp',
+      imgType: getImgType(),
       title,
       scope,
       type,
