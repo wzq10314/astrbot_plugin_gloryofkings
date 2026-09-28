@@ -4,7 +4,7 @@
 
 GloryOfKings-Plugin 的 AstrBot 适配版
 
-![Version](https://img.shields.io/badge/version-1.0.6-blue)
+![Version](https://img.shields.io/badge/version-1.0.7-blue)
 ![AstrBot](https://img.shields.io/badge/AstrBot-4.28.1%2B-purple)
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
 ![OneBot](https://img.shields.io/badge/OneBot11-NapCat-green)
@@ -17,7 +17,7 @@ GloryOfKings-Plugin 的 AstrBot 适配版
 
 这是基于 [longhengmu/GloryOfKings-Plugin](https://gitee.com/longhengmu/GloryOfKings-Plugin) 的完整业务核心适配项目。保留原版 **41 个模块、105 条命令路由、32 份 HTML 模板**，通过常驻 Node 核心对接 AstrBot 的消息、权限、数据目录及后台任务。另补充 AstrBot 管理命令和 `glory_of_kings` LLM 工具。
 
-本版基准提交：[`813e1d7c4909`](https://gitee.com/longhengmu/GloryOfKings-Plugin/commit/813e1d7c490916ed4ed1defb1b14ae03ad41d0d3)，同步于 2026-09-27。后续更新、问题修复以此仓库的提交为上游依据。
+本版基准提交：[`0a385e5c8c83`](https://gitee.com/longhengmu/GloryOfKings-Plugin/commit/0a385e5c8c83a69edbbba7856df51eff0eea9109)，同步于 2026-09-29。后续更新、问题修复以此仓库的提交为上游依据。
 
 > 观战直播、营地消息及共享库的客户端已接入。它们所需的服务端由上游作者单独分发，不包含在公开仓库中，需自行取得服务地址和接入令牌。本包没有伪造接口或附送私人密钥。真实游戏查询需要有效的营地登录态，并受上游接口权限、隐私设置及频控影响。
 
@@ -25,7 +25,7 @@ GloryOfKings-Plugin 的 AstrBot 适配版
 
 仓库地址：[https://github.com/wzq10314/astrbot_plugin_gloryofkings](https://github.com/wzq10314/astrbot_plugin_gloryofkings)。可在 AstrBot 插件管理中使用该 Git 仓库地址安装，或从 [Releases](https://github.com/wzq10314/astrbot_plugin_gloryofkings/releases) 下载 ZIP。
 
-1. 在 AstrBot 后台的插件管理中上传 `astrbot_plugin_gloryofkings-v1.0.6.zip`，然后启用插件。
+1. 在 AstrBot 后台的插件管理中上传 `astrbot_plugin_gloryofkings-v1.0.7.zip`，然后启用插件。
 2. 环境需要 **Python 3.12、Node.js 22+、npm**。Python 依赖随安装包安装，Node 依赖首次启动自动准备。已安装 RConsole 的机器可以复用系统 Node 和 Chromium；两个插件的数据、账号和依赖目录独立。
 3. 管理员私聊机器人发送 `#王者依赖状态`。浏览器就绪的判断包含一次真实启动和截图。未就绪时可发 `#王者浏览器安装`，依赖安装失败时可发 `#王者依赖安装`。
 4. 先发 `#王者帮助` 检查图片，再按下方步骤登录和绑定。
@@ -158,7 +158,7 @@ GloryOfKings-Plugin 的 AstrBot 适配版
 
 ## 验证范围
 
-v1.0.6 通过 33 项 Python 回归、19 项 Node 渲染/存储断言、8 项大神对局池断言及远端授权/IM 错误测试，详见 [验证记录](docs/VALIDATION-v1.0.6.md)。
+v1.0.7 通过 36 项 Python 回归、21 项退群清理用例、成员刷新与失败暂缓测试、19 项 Node 渲染/存储断言、8 项大神对局池断言及远端授权/IM 错误测试，详见 [验证记录](docs/VALIDATION-v1.0.7.md)。
 
 v1.0.3 通过 30 项 Python 集成测试和 14 项 Node 渲染/存储断言：包括完整模块加载、权限、持久化、LLM 路由、真实帮助图片、真实 canvas 趋势图、扫码浏览器会话隔离、账号归属及消息去重。
 
@@ -192,3 +192,12 @@ v1.0.3 通过 30 项 Python 集成测试和 14 项 Node 渲染/存储断言：�
 - `#营地观战连接 地址`、私聊 `#营地消息连接 地址` 可连接已有服务。管理员须先在后台「允许接收营地登录凭据的远端地址」添加完整地址；默认列表为空，不向远端发送登录态。服务地址改变后需要重新添加。
 - 远端服务会接收全部全局营地账号的登录凭据，必须由你控制或信任。插件拒绝凭据上传请求的 HTTP 重定向。原本同机 `127.0.0.1` 部署无需此设置。
 - 外置观战/IM 服务仍由原作者分发，插件源码更新不会自动更新正在运行的服务进程。
+
+
+## v1.0.7 — 2026-09-29
+
+- 同步原作者 `0a385e5c8c83`：用户退群后，停止向该群推送其战绩、上下线提醒和个人日报／周报／月报；其他仍在的订阅群不受影响。
+- AstrBot 在个人推送任务开始前，直接向 OneBot 查询订阅群的最新成员，避免只靠旧缓存判断。
+- 任一订阅群成员查询失败或返回空表时，暂缓该轮个人推送，保留订阅，下一轮重新查询；不会把接口故障当作全员退群。
+- 保留用户的隐身标记。营地 IM 仍仅限私聊；账号隔离、远端凭据地址授权和原有观战功能保持兼容。
+- 不新增配置项，不更改账号、代理、端口或观战/IM 服务进程。外置服务仍由原作者单独分发。

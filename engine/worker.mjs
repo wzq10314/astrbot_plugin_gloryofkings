@@ -6,6 +6,7 @@ import {register} from 'node:module';
 import {AsyncLocalStorage} from 'node:async_hooks';
 import schedule from 'node-schedule';
 import renderer from './renderer.mjs';
+import {runPushTask} from './push-membership.mjs';
 
 register('./loader.mjs',import.meta.url);
 const write=process.stdout.write.bind(process.stdout);
@@ -98,7 +99,7 @@ function makeEvent(data){
   };
   return e;
 }
-let entries=[], jobs=[], black, imStore;
+let entries=[], jobs=[], black, imStore, pushStore;
 const privateFiles=new Set(['campFriend.js','campIm.js','campImDeploy.js']);
 function matches(e){
   return entries.flatMap(([file,app])=>(app.rule||[]).filter(rule=>{
@@ -141,6 +142,7 @@ function inventory(){return entries.map(([file,app])=>({file,name:app.name,
 try {
   const source=path.join(initial.root,'plugins/GloryOfKings-Plugin');
   imStore=await import(pathToFileURL(path.join(source,'utils/campImStore.js')));
+  pushStore=await import(pathToFileURL(path.join(source,'utils/pushStore.js')));
   black=await import(pathToFileURL(path.join(source,'utils/blackList.js')));
   const classes={};
   for(const file of fs.readdirSync(path.join(source,'apps')).filter(f=>f.endsWith('.js')).sort()){
@@ -158,7 +160,17 @@ try {
       let running=false;
       const job=schedule.scheduleJob({rule:task.cron,tz:'Asia/Shanghai'},async()=>{
         if(running)return;running=true;
-        try{await (typeof task.fnc==='function'?task.fnc():app[task.fnc]())}
+        try{
+          const run=()=>typeof task.fnc==='function'?task.fnc():app[task.fnc]();
+          if(['gameRecordPush.js','battleReport.js'].includes(file)){
+            const targets=()=>Object.entries(pushStore.loadPushList()).map(([qq,sub])=>[qq,pushStore.subGroups(sub)]);
+            const before=JSON.stringify(targets());
+            const ids=JSON.parse(before).flatMap(([,groups])=>groups);
+            const ran=await runPushTask(Bot,ids,
+              groups=>call('push_membership',{groups}),run,()=>JSON.stringify(targets())===before);
+            if(!ran)emit({type:'diagnostic',code:'GroupMembershipUnavailable',app:file});
+          }else await run();
+        }
         catch{emit({type:'diagnostic',code:'ScheduledTaskFailed',app:file})}
         finally{running=false}
       });

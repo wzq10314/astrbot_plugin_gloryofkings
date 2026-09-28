@@ -13,6 +13,7 @@ import sys
 import tempfile
 import types
 import unittest
+from unittest.mock import patch
 import yaml
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -73,6 +74,48 @@ class Integration(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(self.bridge.jobs,9)
         for app in self.bridge.inventory:
             self.assertTrue(app['rules'])
+
+    async def test_push_membership_uses_uncached_queries_and_omits_failed_groups(self):
+        original = self.bot.call_action
+
+        async def query(action, **params):
+            if action == 'get_group_member_list':
+                self.assertIs(params.get('no_cache'), True)
+                if params['group_id'] == '2':
+                    return {'status': 'failed', 'retcode': 1200}
+                if params['group_id'] == '3':
+                    return []
+                if params['group_id'] == '4':
+                    return [{'nickname': 'invalid'}]
+            return await original(action, **params)
+
+        self.bot.call_action = query
+        result = await self.bridge.handle('push_membership', {'groups': ['1', '2', '3', '4', '1']})
+        self.assertEqual(set(result['members']), {'1'})
+        self.assertEqual(result['members']['1'][0]['user_id'], 12345001)
+        with self.assertRaises(bridge_module.BridgeError):
+            await self.bridge.push_membership(['not-a-group'])
+
+    async def test_push_membership_waits_for_refresh_instead_of_using_old_cache(self):
+        await self.bridge.refresh_lock.acquire()
+        pending = asyncio.create_task(self.bridge.push_membership(['987654321']))
+        try:
+            await asyncio.sleep(0)
+            self.assertFalse(pending.done())
+        finally:
+            self.bridge.refresh_lock.release()
+        result = await pending
+        self.assertIn('987654321', result['members'])
+
+    async def test_push_membership_lock_wait_is_inside_total_deadline(self):
+        real_timeout = asyncio.timeout
+        await self.bridge.refresh_lock.acquire()
+        try:
+            with patch.object(bridge_module.asyncio, 'timeout', side_effect=lambda seconds: real_timeout(0.02)):
+                result = await asyncio.wait_for(self.bridge.push_membership(['987654321']), 1)
+            self.assertEqual(result, {'members': {}})
+        finally:
+            self.bridge.refresh_lock.release()
 
     async def test_remote_connection_requires_explicit_endpoint_approval(self):
         for command in ('#营地观战连接 https://example.invalid', '#营地消息连接 https://example.invalid'):

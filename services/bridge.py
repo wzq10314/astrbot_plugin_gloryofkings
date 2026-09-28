@@ -164,6 +164,8 @@ class Bridge:
         return result
 
     async def handle(self, op, data):
+        if op == 'push_membership':
+            return await self.push_membership(data.get('groups'))
         if op == 'server_dependencies':
             from .server_dependencies import ServerDependencies
             if not hasattr(self, 'server_dependencies'):
@@ -255,6 +257,36 @@ class Bridge:
         target = {'group_id' if kind=='group' else 'user_id':str(data['id'])}
         return await self.api(f'upload_{kind}_file', **target, file=await self.file(data['file']),
                               name=data.get('name') or Path(data['file']).name)
+
+    async def push_membership(self, groups):
+        """Fetch fresh subscription members; failures never masquerade as departures."""
+        if not isinstance(groups, list) or len(groups) > 2000:
+            raise BridgeError('InvalidGroups')
+        ids = list(dict.fromkeys(str(g) for g in groups))
+        if any(not gid.isdigit() or int(gid) <= 0 for gid in ids):
+            raise BridgeError('InvalidGroups')
+        members = {}
+        slots = asyncio.Semaphore(4)
+
+        async def query(gid):
+            async with slots:
+                try:
+                    async with asyncio.timeout(12):
+                        rows = await self.api('get_group_member_list', group_id=gid, no_cache=True)
+                    if (isinstance(rows, list) and rows and all(
+                            isinstance(row, dict) and str(row.get('user_id', '')).isdigit()
+                            and int(row['user_id']) > 0 for row in rows)):
+                        members[gid] = rows
+                except Exception:
+                    pass  # Omission means unknown; the worker skips this push round.
+
+        try:
+            async with asyncio.timeout(25):
+                async with self.refresh_lock:
+                    await asyncio.gather(*(query(gid) for gid in ids))
+        except TimeoutError:
+            pass
+        return {'members': members}
 
     async def refresh_groups(self, force=False):
         if self.refresh_lock.locked() or (not force and time.monotonic()-self.last_groups<300): return
