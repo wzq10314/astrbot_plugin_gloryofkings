@@ -1,7 +1,7 @@
 name: astrbot_plugin_gloryofkings
 display_name: 王者营地 GloryOfKings
 desc: 完整保留 longhengmu/GloryOfKings-Plugin 业务核心，支持战绩、扫码登录、订阅、观战及营地消息。
-version: v1.0.7
+version: v1.0.8
 author: wzq10314
 support_platforms:
 - aiocqhttp

@@ -53,3 +53,5 @@ watchCdnHttps: ""
 
 # 只有此列表中的服务可接收全局营地账号登录凭据；默认不发送。
 remoteAccountAllowedUrls: []
+
+gameNewsCron: '0 53 */2 * * *'

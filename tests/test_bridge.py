@@ -69,8 +69,8 @@ class Integration(unittest.IsolatedAsyncioTestCase):
         return result,self.bot.calls[start:]
 
     async def test_inventory_loads_all_upstream_apps_and_schedules(self):
-        self.assertEqual(len(self.bridge.inventory),41)
-        self.assertEqual(sum(len(a['rules']) for a in self.bridge.inventory),105)
+        self.assertEqual(len(self.bridge.inventory),42)
+        self.assertEqual(sum(len(a['rules']) for a in self.bridge.inventory),108)
         self.assertGreaterEqual(self.bridge.jobs,9)
         for app in self.bridge.inventory:
             self.assertTrue(app['rules'])
@@ -137,6 +137,26 @@ class Integration(unittest.IsolatedAsyncioTestCase):
         self.assertIn('群管理员',json.dumps(calls,ensure_ascii=False))
         _,calls=await self.command('#开启群日报推送',group='987654321',role='admin')
         self.assertNotIn('仅限',json.dumps(calls,ensure_ascii=False))
+
+    async def test_news_subscription_is_group_scoped_and_requires_admin(self):
+        file=self.bridge.root/'plugins/GloryOfKings-Plugin/data/GameNewsPush.yaml'
+        _,calls=await self.command('#开启王者公告推送',group='987654321')
+        self.assertIn('群管理员',json.dumps(calls,ensure_ascii=False))
+        self.assertFalse(file.exists())
+        _,calls=await self.command('#开启王者公告推送',master=True)
+        self.assertIn('在群里',json.dumps(calls,ensure_ascii=False))
+        self.assertFalse(file.exists())
+        _,calls=await self.command('#开启王者公告推送',group='987654321',role='admin')
+        self.assertIn('已开启',json.dumps(calls,ensure_ascii=False))
+        store=yaml.safe_load(file.read_text(encoding='utf-8'))
+        self.assertEqual(list(store['pushList']),['987654321'])
+        await self.bridge.close()
+        self.bridge=bridge_module.Bridge(self.plugin,self.bot,'test-platform','55555001')
+        await self.bridge.start()
+        self.assertEqual(yaml.safe_load(file.read_text(encoding='utf-8')),store)
+        _,calls=await self.command('#关闭王者公告推送',group='987654321',role='admin')
+        self.assertIn('已关闭',json.dumps(calls,ensure_ascii=False))
+        self.assertEqual(yaml.safe_load(file.read_text(encoding='utf-8'))['pushList'],{})
 
     async def test_binding_switch_delete_persists_and_isolates_users(self):
         for text in ['#绑定营地 77777001','#绑定营地 77777002','#切换营地 1']:

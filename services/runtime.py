@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import shutil
 import yaml
+from .pm2_compat import adapt_pm2
 
 
 def prepare_runtime(engine: Path, destination: Path, settings: dict, host_blacklist=()):
@@ -29,6 +30,8 @@ def prepare_runtime(engine: Path, destination: Path, settings: dict, host_blackl
             raise ValueError('Invalid stale source path')
         path.unlink(missing_ok=True)
     previous_file.write_text(json.dumps(list(manifest['files'])), encoding='utf-8')
+    pm2 = target / 'utils/pm2.js'
+    pm2.write_text(adapt_pm2(pm2.read_text(encoding='utf-8')), encoding='utf-8')
     remote = target / 'utils/remoteAccounts.js'
     text = remote.read_text(encoding='utf-8')
     policy = (engine / 'remote-policy.mjs').resolve().as_uri()

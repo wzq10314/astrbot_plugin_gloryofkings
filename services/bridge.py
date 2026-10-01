@@ -68,6 +68,8 @@ class Bridge:
             env['PATH'] = str(ENGINE/'node_modules/.bin') + os.pathsep + str(Path(node).parent) + os.pathsep + env.get('PATH', '')
             # pm2 instances for external services are isolated from other bots/plugins.
             env['PM2_HOME'] = str(self.root.parent / 'pm2')
+            env['GOK_PM2_JS'] = str(ENGINE / 'node_modules/pm2/bin/pm2')
+            env['NODE_PATH'] = str(ENGINE / 'node_modules') + os.pathsep + env.get('NODE_PATH', '')
             self.proc = await asyncio.create_subprocess_exec(node, str(ENGINE/'worker.mjs'),
                 cwd=self.root, env=env, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE, limit=128*1024*1024,

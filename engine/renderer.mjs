@@ -11,6 +11,14 @@ export function imageType(value) {
   const type=String(value || 'jpeg').toLowerCase().trim();
   return type==='jpg' ? 'jpeg' : ['jpeg','png','webp'].includes(type) ? type : 'jpeg';
 }
+export function screenshotOptions(data) {
+  const type=imageType(data.imgType);
+  const options={type,timeout:45000};
+  if(type!=='png' && typeof data.quality==='number' && Number.isFinite(data.quality)) {
+    options.quality=Math.max(0,Math.min(100,Math.round(data.quality)));
+  }
+  return options;
+}
 export function executable() {
   const configured = process.env.GOK_BROWSER;
   if (configured && fs.existsSync(configured)) return configured;
@@ -65,7 +73,10 @@ export async function render(name, data, onReady) {
     const html = base+template(file,{...data,_res_path:resource,resPath:resource});
     fs.writeFileSync(htmlFile,html);
     page = await newIsolatedPage();
-    await page.setViewport({width:1440,height:1000,deviceScaleFactor:1});
+    // Announcement templates screenshot body and use min-height:100vh; a tall
+    // viewport adds a large empty tail to short notices. Let their content size it.
+    const newsTemplate=['GameNews.html','GameNewsDetail.html'].includes(path.basename(file));
+    await page.setViewport({width:1440,height:newsTemplate?1:1000,deviceScaleFactor:1});
     await page.setRequestInterception(true);
     page.on('request',request=>{
       const url=request.url();
@@ -91,7 +102,7 @@ export async function render(name, data, onReady) {
     const element=await page.$('#container') || await page.$('.container') || await page.$('body');
     const box=await element.boundingBox();
     if (!box || box.height>30000 || box.width>5000) throw Error('RenderSizeLimit');
-    return Buffer.from(await element.screenshot({type:imageType(data.imgType),timeout:45000}));
+    return Buffer.from(await element.screenshot(screenshotOptions(data)));
   } finally { await page?.close().catch(()=>{}); fs.rmSync(htmlFile,{force:true}); }
 }
 export default {
