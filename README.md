@@ -4,7 +4,7 @@
 
 GloryOfKings-Plugin 的 AstrBot 适配版
 
-![Version](https://img.shields.io/badge/version-1.0.8-blue)
+![Version](https://img.shields.io/badge/version-1.0.9-blue)
 ![AstrBot](https://img.shields.io/badge/AstrBot-4.28.1%2B-purple)
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
 ![OneBot](https://img.shields.io/badge/OneBot11-NapCat-green)
@@ -17,7 +17,7 @@ GloryOfKings-Plugin 的 AstrBot 适配版
 
 这是基于 [longhengmu/GloryOfKings-Plugin](https://gitee.com/longhengmu/GloryOfKings-Plugin) 的完整业务核心适配项目。保留上游 **41 个模块、106 条命令路由、34 份 HTML 模板**，通过常驻 Node 核心对接 AstrBot 的消息、权限、数据目录及后台任务。连同 AstrBot 管理适配，实际加载 **42 个模块、108 条路由**，另提供 `glory_of_kings` LLM 工具和 Python 依赖管理命令。
 
-本版基准提交：[`5decf0398463`](https://gitee.com/longhengmu/GloryOfKings-Plugin/commit/5decf0398463433f0e67fddb85c01592ece76fce)，同步于 2026-10-01。后续更新、问题修复以此仓库的提交为上游依据。
+本版基准提交：[`aee9248d71f1`](https://gitee.com/longhengmu/GloryOfKings-Plugin/commit/aee9248d71f1b8524bc27af3d0d2dc8a90d83941)，同步于 2026-10-04。后续更新、问题修复以此仓库的提交为上游依据。
 
 > 观战直播、营地消息及共享库的客户端已接入。它们所需的服务端由上游作者单独分发，不包含在公开仓库中，需自行取得服务地址和接入令牌。本包没有伪造接口或附送私人密钥。营地游戏数据查询需要有效登录态，并受接口权限、隐私设置及频控影响；官网公告查询无需营地登录。
 
@@ -25,7 +25,7 @@ GloryOfKings-Plugin 的 AstrBot 适配版
 
 仓库地址：[https://github.com/wzq10314/astrbot_plugin_gloryofkings](https://github.com/wzq10314/astrbot_plugin_gloryofkings)。可在 AstrBot 插件管理中使用该 Git 仓库地址安装，或从 [Releases](https://github.com/wzq10314/astrbot_plugin_gloryofkings/releases) 下载 ZIP。
 
-1. 在 AstrBot 后台的插件管理中上传 `astrbot_plugin_gloryofkings-v1.0.8.zip`，然后启用插件。
+1. 在 AstrBot 后台的插件管理中上传 `astrbot_plugin_gloryofkings-v1.0.9.zip`，然后启用插件。
 2. 环境需要 **Python 3.12、Node.js 22+、npm**。Python 依赖随安装包安装，Node 依赖首次启动自动准备。已安装 RConsole 的机器可以复用系统 Node 和 Chromium；两个插件的数据、账号和依赖目录独立。
 3. 管理员私聊机器人发送 `#王者依赖状态`。浏览器就绪的判断包含一次真实启动和截图。未就绪时可发 `#王者浏览器安装`，依赖安装失败时可发 `#王者依赖安装`。
 4. 先发 `#王者帮助` 检查图片，再按下方步骤登录和绑定。
@@ -159,7 +159,7 @@ GloryOfKings-Plugin 的 AstrBot 适配版
 
 旧用户重载新版后发 `#营地消息部署` 或 `#营地观战部署`，即可在相应部署流程中自动补齐。此命令也会获取作者当前服务包，不是仅重启服务。安装包携带自动安装逻辑和核心依赖锁文件，不包含跨平台 node_modules；首次安装仍需联网。Node.js 22+、npm 和观战用 ffmpeg 仍是宿主前置条件，Chromium 沿用已有自动准备机制。外置服务仍需作者分发授权，不会随插件自动开通。为避免安装脚本副作用，外置服务依赖安装禁用生命周期脚本；未来若出现需要原生编译的依赖，需进一步适配。
 
-v1.0.8 的观战/IM 服务状态查询只读取现状；没有运行中的守护进程时，不会因查询而启动它。Linux 沿用本机器人原有的独立 PM2 数据目录，更新插件保留服务和进程状态。Windows 兼容上游 lpm2 启动器；检测到旧启动器下的服务时仅提示迁移，不自动搬迁或停止旧进程。
+v1.0.9 的观战/IM 服务状态查询只读取现状；没有运行中的守护进程时，不会因查询而启动它。Linux 沿用本机器人原有的独立 PM2 数据目录，更新插件保留服务和进程状态。Windows 兼容上游 lpm2 启动器；检测到旧启动器下的服务时仅提示迁移，不自动搬迁或停止旧进程。
 
 ## 上游更新与数据保留
 
@@ -171,9 +171,9 @@ v1.0.8 的观战/IM 服务状态查询只读取现状；没有运行中的守护
 
 ## 验证范围
 
-v1.0.8 通过 40 项 Python 回归、21 项公告用例、15 项昵称/观战/部署回归、17 项 PM2 兼容用例、12 项公告真实模板与截图质量检查，以及原有 19 项渲染/存储、8 项大神对局池、21 项退群清理、成员刷新、远端授权及 IM 错误测试。实际加载 42 个模块、108 条路由和 11 个 cron 任务，详见 [本版验证记录](docs/VALIDATION-v1.0.8.md)。
+v1.0.9 通过 40 项 Python 回归、28 项 5v5/10v10 真实浏览器排版检查、15 项原有昵称/观战/部署回归和 21 项退群推送清理检查，并增加开播提醒坐标专项回归。实际加载 42 个模块、108 条路由，详见 [本版验证记录](docs/VALIDATION-v1.0.9.md)。
 
-另对官网公开公告接口和实际 Bridge 出图路径做了只读实测：筛选得到 34 条正式服公告，首条正文包含 23 张图片并分为 3 页，三张图片均低于 1MB。传输使用 Bot 替身，没有向真实 QQ 用户或群发送消息，没有执行营地扫码登录或观战开流。公告接口实测和本地替身测试的边界见验证记录。
+v1.0.8 于 2026-10-01 对官网公开公告接口和实际 Bridge 出图路径做过只读实测：筛选得到 34 条正式服公告，首条正文包含 23 张图片并分为 3 页，三张图片均低于 1MB。传输使用 Bot 替身，没有向真实 QQ 用户或群发送消息，没有执行营地扫码登录或观战开流。公告、截图质量、PM2 等历史验证结果与边界见 [v1.0.8 验证记录](docs/VALIDATION-v1.0.8.md)。
 
 v1.0.7 的 36 项 Python 回归及此前检查结果保留在 [历史验证记录](docs/VALIDATION-v1.0.7.md)。
 
@@ -226,3 +226,9 @@ v1.0.3 通过 30 项 Python 集成测试和 14 项 Node 渲染/存储断言：�
 - 同步群报告昵称/头像补全、不可见字符清理，以及大神观战使用公共对局池的修复；大神观战无需调用人本人登录，账号池仍须有有效登录态。
 - 兼容上游 PM2/lpm2 运维改动，保持状态查询只读和 Linux 原有隔离目录；Windows 旧进程保留迁移提示，不自动搬迁。
 - 保留退群推送清理、IM 私聊限制、账号隔离、远端凭据地址授权和现有服务数据。
+
+## v1.0.9 — 2026-10-04
+
+- 同步上游 `aee9248d71f1`：修复 10v10 战绩详情拥挤、装备竖排，以及开播提示丢失观战坐标。
+- 开播提示保留账号范围和角色信息，后续按范围查询；旧提示缺少信息时保留回退处理。
+- 命令、LLM 调用和配置方式不变。
