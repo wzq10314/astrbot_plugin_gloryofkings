@@ -169,13 +169,10 @@ export class WatchDeploy extends plugin {
     }
 
     // 试连：问一次版本。失败就不写配置
-    const probe = await fetchPackageMeta({ name: PKG_NAME, url, token })
+    const probe = await fetchPackageMeta({ name: PKG_NAME, url, token, logger })
     if (!probe.ok) {
-      return e.reply(
-        `连不上分发服务：${probe.message}\n` +
-        '地址和令牌都没错的话，' + GROUP_HINT,
-        shouldQuote()
-      )
+      // ⚠️ 别再加「连不上分发服务：」前缀 —— probe.message 自己就带具体病因
+      return e.reply(`${probe.message}\n还搞不定就${GROUP_HINT}`, shouldQuote())
     }
 
     Config.modify('config', 'distUrl', url)
@@ -331,7 +328,8 @@ export class WatchDeploy extends plugin {
         logger
       })
       if (!installed.ok) {
-        throw new Error(`${installed.message}\n如果地址令牌没问题，${GROUP_HINT}`)
+        // installed.message 已经是具体病因，别再套「如果地址令牌没问题」
+        throw new Error(`${installed.message}\n还搞不定就${GROUP_HINT}`)
       }
 
       // 解完再校验一遍：文件不齐就别硬起，免得半死不活

@@ -50,6 +50,31 @@
     "tasks": []
   },
   {
+    "file": "help.js",
+    "name": "显示王者插件帮助信息",
+    "rules": [
+      {
+        "reg": "^#?王者(荣耀|农药)?(插件|plugin)?(帮助|help)\\s*(.*)$",
+        "flags": "i",
+        "fnc": "showHelp",
+        "permission": ""
+      },
+      {
+        "reg": "^#?(?:查询战绩帮助|英雄(?:相关)?帮助|皮肤帮助|营地(?:ID)?共享帮助|(?:营地)?观战帮助|营地消息帮助|战绩推送帮助|群战绩报告帮助)$",
+        "flags": "i",
+        "fnc": "showSubHelp",
+        "permission": ""
+      },
+      {
+        "reg": "^#王者设置$",
+        "flags": "",
+        "fnc": "showMasterPanel",
+        "permission": "master"
+      }
+    ],
+    "tasks": []
+  },
+  {
     "file": "watchDeploy.js",
     "name": "王者营地观战运维",
     "rules": [
@@ -451,7 +476,7 @@
     "name": "王者对比",
     "rules": [
       {
-        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(王者)?对比\\s*(.*)$",
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#王者对比\\s*(.*)$",
         "flags": "",
         "fnc": "compare",
         "permission": ""
@@ -682,12 +707,6 @@
         "permission": ""
       },
       {
-        "reg": "^#(?:获取|怎么看|如何获取)营地ID$",
-        "flags": "i",
-        "fnc": "howToGetWzryId",
-        "permission": ""
-      },
-      {
         "reg": "(?:^\\s*@[^#]*(?=#)|^)#绑定营地\\s*(.*)$",
         "flags": "",
         "fnc": "bindWzryId",
@@ -759,25 +778,6 @@
         "flags": "",
         "fnc": "allPeak",
         "permission": ""
-      }
-    ],
-    "tasks": []
-  },
-  {
-    "file": "help.js",
-    "name": "显示王者插件帮助信息",
-    "rules": [
-      {
-        "reg": "^#?王者(荣耀|农药)?(插件|plugin)?(帮助|help)\\s*(.*)$",
-        "flags": "i",
-        "fnc": "showHelp",
-        "permission": ""
-      },
-      {
-        "reg": "^#王者设置$",
-        "flags": "",
-        "fnc": "showMasterPanel",
-        "permission": "master"
       }
     ],
     "tasks": []

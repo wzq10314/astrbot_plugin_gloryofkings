@@ -4,7 +4,7 @@
 
 GloryOfKings-Plugin 的 AstrBot 适配版
 
-![Version](https://img.shields.io/badge/version-1.0.9-blue)
+![Version](https://img.shields.io/badge/version-1.0.10-blue)
 ![AstrBot](https://img.shields.io/badge/AstrBot-4.28.1%2B-purple)
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
 ![OneBot](https://img.shields.io/badge/OneBot11-NapCat-green)
@@ -17,7 +17,7 @@ GloryOfKings-Plugin 的 AstrBot 适配版
 
 这是基于 [longhengmu/GloryOfKings-Plugin](https://gitee.com/longhengmu/GloryOfKings-Plugin) 的完整业务核心适配项目。保留上游 **41 个模块、106 条命令路由、34 份 HTML 模板**，通过常驻 Node 核心对接 AstrBot 的消息、权限、数据目录及后台任务。连同 AstrBot 管理适配，实际加载 **42 个模块、108 条路由**，另提供 `glory_of_kings` LLM 工具和 Python 依赖管理命令。
 
-本版基准提交：[`aee9248d71f1`](https://gitee.com/longhengmu/GloryOfKings-Plugin/commit/aee9248d71f1b8524bc27af3d0d2dc8a90d83941)，同步于 2026-10-04。后续更新、问题修复以此仓库的提交为上游依据。
+本版基准提交：[`3f4d4a335900`](https://gitee.com/longhengmu/GloryOfKings-Plugin/commit/3f4d4a33590099d41c6cc499a30de6bb3da25f20)，同步于 2026-10-04。后续更新、问题修复以此仓库的提交为上游依据。
 
 > 观战直播、营地消息及共享库的客户端已接入。它们所需的服务端由上游作者单独分发，不包含在公开仓库中，需自行取得服务地址和接入令牌。本包没有伪造接口或附送私人密钥。营地游戏数据查询需要有效登录态，并受接口权限、隐私设置及频控影响；官网公告查询无需营地登录。
 
@@ -25,7 +25,7 @@ GloryOfKings-Plugin 的 AstrBot 适配版
 
 仓库地址：[https://github.com/wzq10314/astrbot_plugin_gloryofkings](https://github.com/wzq10314/astrbot_plugin_gloryofkings)。可在 AstrBot 插件管理中使用该 Git 仓库地址安装，或从 [Releases](https://github.com/wzq10314/astrbot_plugin_gloryofkings/releases) 下载 ZIP。
 
-1. 在 AstrBot 后台的插件管理中上传 `astrbot_plugin_gloryofkings-v1.0.9.zip`，然后启用插件。
+1. 在 AstrBot 后台的插件管理中上传 `astrbot_plugin_gloryofkings-v1.0.10.zip`，然后启用插件。
 2. 环境需要 **Python 3.12、Node.js 22+、npm**。Python 依赖随安装包安装，Node 依赖首次启动自动准备。已安装 RConsole 的机器可以复用系统 Node 和 Chromium；两个插件的数据、账号和依赖目录独立。
 3. 管理员私聊机器人发送 `#王者依赖状态`。浏览器就绪的判断包含一次真实启动和截图。未就绪时可发 `#王者浏览器安装`，依赖安装失败时可发 `#王者依赖安装`。
 4. 先发 `#王者帮助` 检查图片，再按下方步骤登录和绑定。
@@ -33,6 +33,25 @@ GloryOfKings-Plugin 的 AstrBot 适配版
 依赖准备可能需要几分钟。默认 npm 镜像是 `https://registry.npmmirror.com`，可在后台修改。优先复用系统 Chromium；Debian/root 容器默认允许补装浏览器及系统库。可通过 `engine_auto_browser_system` 关闭系统包自动安装。
 
 手动安装时，解压后的目录应为 `/AstrBot/data/plugins/astrbot_plugin_gloryofkings/main.py`，不能再套一层同名目录。保存后重载插件。详细说明见 [安装与排错](docs/INSTALL.md)。
+
+## 帮助菜单
+
+发送 `#王者帮助` 获取三列主菜单，按需使用以下子帮助查看完整命令；这些帮助也支持自然语言调用。
+
+| 命令 | 内容 |
+| --- | --- |
+| `#查询战绩帮助` | 战绩、赛季表现和分数趋势 |
+| `#英雄相关帮助` | 英雄详情、战力、攻略和称号墙 |
+| `#皮肤帮助` | 皮肤查询、皮肤墙、缺失和上新 |
+| `#营地ID共享帮助` | 营地 ID 共享设置 |
+| `#营地观战帮助` | 好友观战、大神观战和开播 |
+| `#营地消息帮助` | 营地消息功能使用说明 |
+| `#战绩推送帮助` | 战绩、上下线和个人报告推送 |
+| `#群战绩报告帮助` | 群战绩报告及推送 |
+
+帮助图片渲染失败时返回文字。主人/系统指令和观战、消息的运维条目仅在管理员私聊的帮助里展示；营地消息帮助不查询私人数据，实际好友和消息功能仍只能私聊使用。
+
+不知道营地 ID 在哪里时，在群里发送不带参数的 `#绑定营地`，机器人会给出教程图。原版已取消 `#获取营地ID` / `#怎么看营地ID` 等旧教程入口；比较账号使用 `#王者对比`，泛指令 `#对比` 不再触发插件。
 
 ## 观战服务：获取地址和令牌
 
@@ -171,6 +190,8 @@ v1.0.9 的观战/IM 服务状态查询只读取现状；没有运行中的守护
 
 ## 验证范围
 
+v1.0.10 的分块帮助、实际图片渲染、命令路由和服务接入错误分类验证见 [本版验证记录](docs/VALIDATION-v1.0.10.md)。以下旧版本记录保留各自执行日期和范围。
+
 v1.0.9 通过 40 项 Python 回归、28 项 5v5/10v10 真实浏览器排版检查、15 项原有昵称/观战/部署回归和 21 项退群推送清理检查，并增加开播提醒坐标专项回归。实际加载 42 个模块、108 条路由，详见 [本版验证记录](docs/VALIDATION-v1.0.9.md)。
 
 v1.0.8 于 2026-10-01 对官网公开公告接口和实际 Bridge 出图路径做过只读实测：筛选得到 34 条正式服公告，首条正文包含 23 张图片并分为 3 页，三张图片均低于 1MB。传输使用 Bot 替身，没有向真实 QQ 用户或群发送消息，没有执行营地扫码登录或观战开流。公告、截图质量、PM2 等历史验证结果与边界见 [v1.0.8 验证记录](docs/VALIDATION-v1.0.8.md)。
@@ -232,3 +253,9 @@ v1.0.3 通过 30 项 Python 集成测试和 14 项 Node 渲染/存储断言：�
 - 同步上游 `aee9248d71f1`：修复 10v10 战绩详情拥挤、装备竖排，以及开播提示丢失观战坐标。
 - 开播提示保留账号范围和角色信息，后续按范围查询；旧提示缺少信息时保留回退处理。
 - 命令、LLM 调用和配置方式不变。
+
+## v1.0.10 — 2026-10-04
+
+- 同步上游 `3f4d4a335900`：三列分块帮助、8 类子帮助、群聊无参数绑定教程；取消泛指令 `#对比`。
+- 同步服务接入错误分类，区分 DNS、拒绝连接、中断、超时、证书和 HTTP 状态；适配层保持错误内容脱敏，证书失败提示核对证书与时间。
+- 同步 AstrBot 路由和 LLM 帮助说明，保持管理员权限、IM 私聊限制及现有服务数据。

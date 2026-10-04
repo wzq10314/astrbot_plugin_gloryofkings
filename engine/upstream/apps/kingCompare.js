@@ -112,14 +112,17 @@ export class KingCompare extends plugin {
       event: 'message',
       priority: 0,
       rule: [
-        { reg: `${AT_HEAD}#(王者)?对比\\s*(.*)$`, fnc: 'compare' }
+        // ⚠️ 只认 `#王者对比`，**不认** `#对比`（原来这里是 `#(王者)?对比`）。
+        //    `#对比` 太泛：群里聊到「#对比」两个字的闲聊会被当成指令。
+        //    参数解析那行也要跟着改成 `^#王者对比`，不然前缀剥不掉、数字进不了解析。
+        { reg: `${AT_HEAD}#王者对比\\s*(.*)$`, fnc: 'compare' }
       ]
     })
   }
 
   async compare (e) {
     const self = String(e.user_id)
-    const input = stripAtText(e.msg).replace(/^#(王者)?对比\s*/, '').trim()
+    const input = stripAtText(e.msg).replace(/^#王者对比\s*/, '').trim()
     const nums = input.split(/[\s,，、]+/).filter(tok => /^\d+$/.test(tok))
     const campIds = nums.filter(tok => tok.length >= 5)
     const indexes = nums.filter(tok => tok.length < 5).map(Number)

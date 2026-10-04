@@ -45,7 +45,11 @@ export default class Button {
   static bind() {
     return segment.button([
       { text: '绑定营地', input: '#绑定营地' },
-      { text: '怎么获取ID', callback: '#获取营地ID' }
+      // ⚠️ 原来这里 callback 的是 `#获取营地ID`，那条指令已删（新用户记不住第二条）。
+      //    现在裸发 `#绑定营地`（不带 ID）就会出那张「营地ID从哪看」的教程图，
+      //    所以这里直接 callback 它 —— 和左边那颗的区别是：左边把文本填进输入框等用户补 ID，
+      //    这颗点下去立刻出教程。
+      { text: '怎么获取ID', callback: '#绑定营地' }
     ])
   }
 

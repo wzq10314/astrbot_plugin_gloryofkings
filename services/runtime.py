@@ -2,9 +2,40 @@
 import hashlib
 import json
 from pathlib import Path
+import re
 import shutil
 import yaml
 from .pm2_compat import adapt_pm2
+
+
+def adapt_deploy_errors(source: str, helper: Path) -> str:
+    """Replace network diagnostics only in the runtime copy; upstream stays exact."""
+    replacements = (
+        ("""    // 原始错误进日志，别丢 —— 用户看到的是一句人话，排查靠的是这行
+    logger?.warn?.(`[deploy] 请求 ${base} 失败：${error?.name} ${error?.message} code=${error?.cause?.code || '-'}`)
+    return { ok: false, message: describeNetError(error, base) }""",
+         """    // AstrBot: only fixed descriptions and a parsed host may leave this boundary.
+    return { ok: false, message: describeNetError(error, base) }""", 'metadata failure'),
+        ("""    // 下载阶段超时通常是网络慢或包太大，和「连不上」是两回事，文案分开
+    logger?.warn?.(`[deploy] 下载 ${name} 失败：${error?.name} ${error?.message} code=${error?.cause?.code || '-'}`)
+    const msg = error?.name === 'TimeoutError'
+      ? '下载超时（网络慢或包太大，重试一次）'
+      : describeNetError(error, base).replace(/^连不上分发服务/, '下载中断')
+    return { ok: false, message: msg }""",
+         """    return { ok: false, message: describeNetError(error, base, 'download') }""", 'download failure'),
+    )
+    for before, after, name in replacements:
+        if source.count(before) != 1:
+            raise ValueError('Upstream deployment error hook changed: ' + name)
+        source = source.replace(before, after)
+    # The upstream function is removed, including its raw-message fallback and HTTP advice.
+    pattern = (r'^function describeNetError \(error, base\) \{\n.*?^\}'
+               r'(?=\n\n/\*\*\n \* 下载代码包到内存。)')
+    source, count = re.subn(pattern, '', source, flags=re.MULTILINE | re.DOTALL)
+    if count != 1:
+        raise ValueError('Upstream deployment error hook changed: network classifier')
+    return (f'import {{describeDeployNetworkError as describeNetError}} from '
+            f'{json.dumps(helper.resolve().as_uri())};\n' + source)
 
 
 def prepare_runtime(engine: Path, destination: Path, settings: dict, host_blacklist=()):
@@ -32,6 +63,9 @@ def prepare_runtime(engine: Path, destination: Path, settings: dict, host_blackl
     previous_file.write_text(json.dumps(list(manifest['files'])), encoding='utf-8')
     pm2 = target / 'utils/pm2.js'
     pm2.write_text(adapt_pm2(pm2.read_text(encoding='utf-8')), encoding='utf-8')
+    deploy = target / 'utils/deploy.js'
+    deploy.write_text(adapt_deploy_errors(deploy.read_text(encoding='utf-8'), engine / 'deploy-errors.mjs'),
+                      encoding='utf-8')
     remote = target / 'utils/remoteAccounts.js'
     text = remote.read_text(encoding='utf-8')
     policy = (engine / 'remote-policy.mjs').resolve().as_uri()

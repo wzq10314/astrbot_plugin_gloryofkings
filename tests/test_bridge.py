@@ -184,6 +184,28 @@ class Integration(unittest.IsolatedAsyncioTestCase):
         out=os.environ.get('GOK_PREVIEW')
         if out:Path(out).write_bytes(data)
 
+    async def test_subhelp_routes_before_watch_and_im_handlers(self):
+        for text in ['#营地观战帮助','#营地消息帮助']:
+            with self.subTest(command=text):
+                result,calls=await self.command(text,group='987654321')
+                images=[s for action,p in calls if action.startswith('send_') for s in p.get('message',[]) if s['type']=='image']
+                self.assertTrue(result['handled'])
+                self.assertTrue(images,'subhelp should render without querying watch or private IM data')
+                self.assertNotIn('编号不对',str(result.get('messages')))
+        self.assertFalse(await self.bridge.request('match',event('#对比 12345678')))
+        self.assertFalse(await self.bridge.request('match',event('#获取营地ID')))
+
+    async def test_bare_binding_returns_tutorial_without_creating_binding(self):
+        file=self.bridge.root/'plugins/GloryOfKings-Plugin/data/UserData.yaml'
+        before=file.read_bytes()
+        result,calls=await self.command('#绑定营地',group='987654321')
+        self.assertTrue(result['handled'])
+        self.assertIn('获取教程',str(result.get('messages')))
+        self.assertTrue(any(s['type']=='image' for action,p in calls if action.startswith('send_') for s in p.get('message',[])))
+        self.assertEqual(file.read_bytes(),before)
+        _,calls=await self.command('#绑定营地')
+        self.assertIn('群里',json.dumps(calls,ensure_ascii=False))
+
     async def test_onebot_account_routing_and_local_file_boundary(self):
         await self.bridge.refresh_groups(force=True)
         self.assertTrue(all(p['self_id']=='55555001' for _,p in self.bot.calls))

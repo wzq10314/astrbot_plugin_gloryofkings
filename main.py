@@ -15,7 +15,7 @@ from .services.tool_commands import normalize as normalize_tool_command
 from .services.tool_commands import private_only, PRIVATE_NOTICE
 
 
-@register('astrbot_plugin_gloryofkings', 'wzq10314', '王者营地全功能核心 AstrBot 适配', '1.0.9')
+@register('astrbot_plugin_gloryofkings', 'wzq10314', '王者营地全功能核心 AstrBot 适配', '1.0.10')
 class GloryOfKingsPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -176,14 +176,14 @@ class GloryOfKingsPlugin(Star):
     @event_filter.llm_tool(name='glory_of_kings')
     async def kings_tool(self, event: AstrMessageEvent, command: str) -> str:
         """调用王者荣耀/王者营地插件。将自然语言请求转换为以下单条命令，无需用户自己输入指令。
-        查询：营地ID、获取营地ID、王者主页、全部王者主页、查询战绩、排位战绩、巅峰战绩、
+        查询：营地ID、王者主页、全部王者主页、查询战绩、排位战绩、巅峰战绩、
         查询2战绩、查询战绩3（第3场详情）、查战绩 英雄名、英雄详情 英雄名、
         排位表现 [营地ID] [s40]、巅峰表现 [营地ID] [s40]、赛季表现、全部排位表现、全部巅峰表现、
         常用英雄、我的英雄、查战力 英雄名、英雄梯度 [段位] [分路]、英雄攻略 英雄名、
         查皮肤 英雄名、皮肤墙、全部皮肤、缺皮肤、皮肤上新、称号墙、王者公告、王者公告列表、
         巅峰趋势 [天数]、段位趋势 [天数]、王者对比 @QQ号、排位排名、巅峰排名、排位总排名、巅峰总排名、
         王者日报、王者周报、王者月报、群日报、群周报、群月报、谁在打游戏、导出战绩 [天数]。
-        账号：绑定营地 数字营地ID（在群里绑定）、切换营地 序号、删除营地 序号、
+        账号：绑定营地 数字营地ID（在群里绑定）；群里只发绑定营地可看获取ID教程；切换营地 序号、删除营地 序号、
         营地QQ全局登录、营地wx全局登录（用户私聊时才可发起二维码，由用户自己扫码确认）。
         订阅：开启或关闭战绩推送、上下线提醒、在线状态、日报推送、周报推送、月报推送；
         开启或关闭群日报推送、群周报推送、群月报推送、皮肤上新推送、王者公告推送（当前群管理员权限）；
@@ -193,7 +193,9 @@ class GloryOfKingsPlugin(Star):
         王者公告不需要登录。观战大神使用全局账号池，发起人无需自己先登录，池中仍需有可用账号。
         营地好友及所有 IM 消息功能只能在私聊调用。群聊中请提示转到私聊，不能展示好友或消息内容。
         共享：开启营地ID共享、关闭营地ID共享、营地ID共享状态。仅在用户明确要求共享时操作。
-        帮助：王者帮助 [关键词]、王者更新日志。未绑定时如实转述，不要虚构战绩或声称功能不存在。
+        帮助：王者帮助 [关键词]、查询战绩帮助、英雄相关帮助、皮肤帮助、营地ID共享帮助、
+        营地观战帮助、营地消息帮助、战绩推送帮助、群战绩报告帮助、王者更新日志。
+        对比数据只用王者对比，不用泛指令对比。未绑定时如实转述，不要虚构战绩或声称功能不存在。
         不收集或传递 token/密码/配置密钥；部署、凭据管理、数据清理和向营地好友发私信请用户直接发命令。
         仅执行用户明确要求的绑定、删除、登录、开播或订阅；不要自动操作作为查询的前置步骤。
         未提供营地ID时使用发送者已绑定的账号，不猜测任何QQ号、营地ID、序号或英雄名。
@@ -242,7 +244,7 @@ class GloryOfKingsPlugin(Star):
         if time.monotonic()-timestamp<300 and text: return text
         manifest=json.loads((Path(__file__).parent/'UPSTREAM.json').read_text(encoding='utf-8'))
         current=manifest['commit']
-        prefix=f'AstrBot 适配版 1.0.9\n上游：{manifest["repository"]}\n本版基准：{current[:12]}'
+        prefix=f'AstrBot 适配版 1.0.10\n上游：{manifest["repository"]}\n本版基准：{current[:12]}'
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15),trust_env=True) as client:
                 async with client.get('https://gitee.com/api/v5/repos/longhengmu/GloryOfKings-Plugin/commits',params={'sha':'master','per_page':5}) as response:

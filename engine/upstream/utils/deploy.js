@@ -229,9 +229,16 @@ export function normalizeBase (url) {
  * 问服务器「这个包现在是什么版本」，不下载。
  * 任何失败都翻译成 `{ok:false, message}`，不抛。
  *
+ * ⚠️ 别把所有网络错误都说成「超时」。原来只有两档：
+ * `TimeoutError` → 超时，其余一律「连不上（检查地址和网络）」——
+ * 结果 DNS 解析不出、TLS 握手失败、连接被防火墙丢弃（对端不回 RST 只会一直等，
+ * 最后也是超时）三种完全不同的病因，用户看到的提示几乎一样，没法自查。
+ * 现在按 `error.cause.code` 分档给具体线索。
+ *
+ * @param {object} [opts.logger] 传了就顺手记一条原始错误（排查用）
  * @returns {Promise<{ok: boolean, sha?: string, size?: number, sha256?: string, message?: string}>}
  */
-export async function fetchPackageMeta ({ name, url, token, timeout = 10000 } = {}) {
+export async function fetchPackageMeta ({ name, url, token, timeout = 10000, logger } = {}) {
   const base = normalizeBase(url)
   if (!base) return { ok: false, message: '还没配分发服务地址' }
   if (!token) return { ok: false, message: '还没配分发令牌' }
@@ -245,25 +252,68 @@ export async function fetchPackageMeta ({ name, url, token, timeout = 10000 } = 
     if (res.status === 401) return { ok: false, message: '令牌无效，找主人要一个新的' }
     if (res.status === 403) return { ok: false, message: '令牌已被吊销，找主人要一个新的' }
     if (res.status === 404) return { ok: false, message: `服务器上没有「${name}」这个包` }
+    if (res.status === 429) return { ok: false, message: '请求太频繁，过一会儿再试' }
     if (!res.ok) return { ok: false, message: `服务器返回 ${res.status}` }
 
     const data = await res.json().catch(() => null)
     if (!data?.sha) return { ok: false, message: '服务器返回的内容看不懂' }
     return { ok: true, sha: data.sha, size: data.size, sha256: data.sha256 }
   } catch (error) {
-    const msg = error?.name === 'TimeoutError'
-      ? '连服务器超时'
-      : '连不上分发服务（检查地址和网络）'
-    return { ok: false, message: msg }
+    // 原始错误进日志，别丢 —— 用户看到的是一句人话，排查靠的是这行
+    logger?.warn?.(`[deploy] 请求 ${base} 失败：${error?.name} ${error?.message} code=${error?.cause?.code || '-'}`)
+    return { ok: false, message: describeNetError(error, base) }
   }
+}
+
+/**
+ * 把 fetch 抛的错翻成「用户能照着做」的一句话。
+ *
+ * 分档依据（实测）：
+ *   · `TimeoutError` + 地址对 → 多半是被防火墙丢了（不回 RST，只能干等超时）
+ *   · `ENOTFOUND` / `EAI_AGAIN` → 域名解析不出来（IPv4 客户端解析只有 AAAA 的域名就是这个）
+ *   · `ECONNREFUSED` → 地址通了但端口没服务
+ *   · 证书类 → HTTPS 但证书不对
+ */
+function describeNetError (error, base) {
+  const code = error?.cause?.code || ''
+  // ⚠️ 有些失败没有 code，只有 message（实测：端口非法时 cause.message = 'bad port'）。
+  //    兜底把 cause.message 也拿来匹配，别让这类错误掉进最后的泛泛文案。
+  const causeMsg = String(error?.cause?.message || '')
+  const host = base.replace(/^https?:\/\//i, '').split('/')[0]
+
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') {
+    return `解析不出地址「${host}」—— 检查地址拼写，或这台机器连不上那个域名`
+  }
+  if (code === 'ECONNREFUSED') {
+    return `连不上 ${host}：对方拒绝了连接（服务没跑或端口不对）`
+  }
+  if (code === 'ECONNRESET') {
+    return `连接被 ${host} 掐断 —— 中途断的，可能是网络不稳，重试一次`
+  }
+  if (code === 'ETIMEDOUT' || code === 'EHOSTUNREACH' || code === 'ENETUNREACH') {
+    return `连不上 ${host}（网络不通）—— 地址或端口可能不对`
+  }
+  if (/bad port|invalid port/i.test(causeMsg)) {
+    return `地址里的端口不对（${host}）—— 端口要写 1~65535，或者干脆不写`
+  }
+  if (/CERT|SSL|TLS|UNABLE_TO_VERIFY/i.test(code) || /certificate|self.signed/i.test(causeMsg)) {
+    return `HTTPS 证书校验没过（${host}）—— 地址换成 http:// 试试`
+  }
+  if (error?.name === 'TimeoutError') {
+    // 超时是**最没有信息量**的一种：请求发出去了，但一直没人回。
+    // 把「大概率是什么」直接写出来，省得用户只看到「检查地址和网络」干瞪眼。
+    return `连服务器超时（${host}）—— 对方端口可能没对外放行`
+  }
+  return `连不上分发服务（${error?.message || '未知错误'}）`
 }
 
 /**
  * 下载代码包到内存。观战包 ~100KB、消息包瘦身后几十 KB，进内存完全没问题。
  *
+ * @param {object} [opts.logger] 传了就顺手记一条原始错误（排查用）
  * @returns {Promise<{ok: boolean, buffer?: Buffer, sha?: string, message?: string}>}
  */
-export async function downloadPackage ({ name, sha, url, token, timeout = 180000 } = {}) {
+export async function downloadPackage ({ name, sha, url, token, timeout = 180000, logger } = {}) {
   const base = normalizeBase(url)
   if (!base) return { ok: false, message: '还没配分发服务地址' }
 
@@ -277,14 +327,17 @@ export async function downloadPackage ({ name, sha, url, token, timeout = 180000
     if (res.status === 401) return { ok: false, message: '令牌无效，找主人要一个新的' }
     if (res.status === 403) return { ok: false, message: '令牌已被吊销，找主人要一个新的' }
     if (res.status === 404) return { ok: false, message: `服务器上没有「${name}」这个包` }
+    if (res.status === 429) return { ok: false, message: '请求太频繁，过一会儿再试' }
     if (!res.ok) return { ok: false, message: `下载失败（HTTP ${res.status}）` }
 
     const buffer = Buffer.from(await res.arrayBuffer())
     return { ok: true, buffer, sha: res.headers.get('x-gok-sha') || sha }
   } catch (error) {
+    // 下载阶段超时通常是网络慢或包太大，和「连不上」是两回事，文案分开
+    logger?.warn?.(`[deploy] 下载 ${name} 失败：${error?.name} ${error?.message} code=${error?.cause?.code || '-'}`)
     const msg = error?.name === 'TimeoutError'
-      ? '下载超时'
-      : '下载中断（检查网络）'
+      ? '下载超时（网络慢或包太大，重试一次）'
+      : describeNetError(error, base).replace(/^连不上分发服务/, '下载中断')
     return { ok: false, message: msg }
   }
 }
@@ -307,7 +360,7 @@ export async function downloadPackage ({ name, sha, url, token, timeout = 180000
 export async function installPackage ({
   name, url, token, destDir, entry, exclude = DEFAULT_EXCLUDE, logger
 } = {}) {
-  const meta = await fetchPackageMeta({ name, url, token })
+  const meta = await fetchPackageMeta({ name, url, token, logger })
   if (!meta.ok) return { ok: false, message: meta.message }
 
   const state = readInstallState(destDir)
@@ -318,7 +371,7 @@ export async function installPackage ({
     return { ok: true, sha: meta.sha, updated: false, files: state.files || [] }
   }
 
-  const down = await downloadPackage({ name, sha: meta.sha, url, token })
+  const down = await downloadPackage({ name, sha: meta.sha, url, token, logger })
   if (!down.ok) return { ok: false, message: down.message }
 
   let result

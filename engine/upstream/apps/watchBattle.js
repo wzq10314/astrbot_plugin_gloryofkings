@@ -195,11 +195,12 @@ export class WatchBattle extends plugin {
 
   async watch (e) {
     const arg = stripAtText(e.msg).replace(/^#(?:营地)?观战\s*/, '').trim()
-    // 运维词（#营地观战部署 / #营地观战服务）归 apps/watchDeploy.js 管 ——
-    // 它 priority 是 -1、正常情况抢在前面就拦下了；这里再放行一次是兜底，
-    // 万一 priority 语义变了，才不会掉进下面的序号解析里报一句「编号不对」。
-    // `return false` = 不拦截，继续交给后面的 rule
-    if (/^(部署|服务)$/.test(arg)) return false
+    // 不归本文件管的词，一律放行给别的 rule，别掉进下面的序号解析里报一句「编号不对」：
+    //   · 部署 / 服务 —— apps/watchDeploy.js 的运维指令
+    //   · 帮助 —— apps/help.js 的 `#营地观战帮助`（子帮助入口）
+    // 那两个插件 priority 都是 -1、正常情况抢在前面就拦下了；这里再放行一次是兜底，
+    // 万一 priority 语义变了也不会出洋相。`return false` = 不拦截，继续交给后面的 rule
+    if (/^(部署|服务|帮助)$/.test(arg)) return false
     // ⚠️「停」「列表」「在播」放在最前判：别让它们掉进序号解析里去。
     // 停止不需要登录态：看的那一路可能是别人开的，谁在看谁就能收自己这一路。
     if (/^(停|停止|关|关闭|stop)$/i.test(arg)) return this.stopMine(e)

@@ -49,17 +49,18 @@
     }
 
     /*
-     * 宽度 1440rem 配下面 .cards 的 4 列是一起定的，别单独改其中一个。
+     * 宽度 1440rem 配下面 .cards 的 3 列是一起定的，别单独改其中一个。
      *
      * **关键：按屏幕宽度适配看图时，字号只取决于原图总宽，跟列数无关。**
      * 列数只决定每张卡多宽（留白多少）、说明能写多少字。所以想让字变大就得收窄
-     * #container —— 3600px 宽缩到手机屏上只有 0.228，2880px 宽能到 0.285，等效字号
-     * 直接大 25%。只把 5 列改成 4 列而不收宽度的话，字是一点没变大的。
+     * #container。只改列数而不动宽度的话，字是一点没变大的。
      *
      * 历史：1080rem + 3 列（2160x5718，1:2.65 的细长条，缩到 20% 才看得全，糊成一团）→
      * 1800rem + 5 列（3600x4457，1:1.24，按「整页装进屏幕」看最优）→
-     * 现在 1440rem + 4 列（2880x5519，1:1.92）。主人是在手机上点开大图上下滑着看，
-     * 这个看法下按宽度适配，字最大。哪天真要「一眼看完整页」，得回到 5 列那个比例。
+     * 1440rem + 4 列（2880x5519，1:1.92）→
+     * 现在 1440rem + 3 列：卡变宽、说明少截断，代价是行数变多、整图更高。
+     * 主人是在手机上点开大图上下滑着看，这个看法下按宽度适配，字最大。
+     * 哪天真要「一眼看完整页」，得回到 5 列那个比例。
      */
     #container {
         width: 1440rem;
@@ -213,18 +214,12 @@
         background: color-mix(in srgb, var(--accent) 14%, transparent);
         border: 1rem solid color-mix(in srgb, var(--accent) 34%, transparent);
     }
-
-    .panel-count {
-        margin-left: auto;
-        font-size: 12rem;
-        color: var(--c-text-dim);
-    }
 </style>
 <style>
     .cards {
         display: grid;
         /* 列数与 #container 宽度绑定，改动见上面 #container 的注释 */
-        grid-template-columns: repeat(4, 1fr);
+        grid-template-columns: repeat(3, 1fr);
         gap: 14rem;
     }
 
@@ -343,7 +338,6 @@
                         <span class="panel-desc">{{section.desc}}</span>
                     </div>
                     {{if section.master}}<span class="tag-master">主人权限</span>{{/if}}
-                    <span class="panel-count">{{section.list.length}} 条</span>
                 </div>
                 <div class="cards">
                     {{each section.list item}}

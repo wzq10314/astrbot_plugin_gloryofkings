@@ -143,13 +143,13 @@ export class CampImDeploy extends plugin {
       return e.reply('令牌看着不对（太短了）。' + GROUP_HINT, shouldQuote())
     }
 
-    const probe = await fetchPackageMeta({ name: PKG_NAME, url, token })
+    const probe = await fetchPackageMeta({ name: PKG_NAME, url, token, logger })
     if (!probe.ok) {
-      return e.reply(
-        `连不上分发服务：${probe.message}\n` +
-        '地址和令牌都没错的话，' + GROUP_HINT,
-        shouldQuote()
-      )
+      // ⚠️ 别再加「连不上分发服务：」这个前缀 —— probe.message 现在自己就带
+      //    具体病因（解析不出地址 / 端口没放行 / 令牌无效…），套上前缀反而说不通。
+      //    尾巴的 GROUP_HINT 也只在「用户没法自己解决」时才有意义，所以直接跟一句
+      //    「还不行就」再给群号，而不是重复「地址和令牌都没错的话」。
+      return e.reply(`${probe.message}\n还搞不定就${GROUP_HINT}`, shouldQuote())
     }
 
     Config.modify('config', 'distUrl', url)
@@ -292,7 +292,9 @@ export class CampImDeploy extends plugin {
         logger
       })
       if (!installed.ok) {
-        throw new Error(`${installed.message}\n如果地址令牌没问题，${GROUP_HINT}`)
+        // installed.message 已经是具体病因（含 HTTP 状态 / 网络错误码翻译），
+        // 别再套「如果地址令牌没问题」—— 那句话对 401/404 这种明确错误是误导
+        throw new Error(`${installed.message}\n还搞不定就${GROUP_HINT}`)
       }
 
       const missing = NEEDED.filter(f => !fs.existsSync(path.join(PluginPath, f)))

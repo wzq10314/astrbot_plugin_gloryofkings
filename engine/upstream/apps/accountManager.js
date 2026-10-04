@@ -30,10 +30,9 @@ export class AccountManager extends plugin {
           reg: new RegExp(`${AT_HEAD}#(?:营地|我的(?:王者|荣耀|农药)|(?:王者|荣耀|农药))ID${AT_TAIL}`, 'i'),
           fnc: 'myWzryId'
         },
-        {
-          reg: /^#(?:获取|怎么看|如何获取)营地ID$/i,
-          fnc: 'howToGetWzryId'
-        },
+        // ⚠️ 原来这里还有一条 `^#(?:获取|怎么看|如何获取)营地ID$` → howToGetWzryId。
+        //    已删：新用户第一反应是发 `#绑定营地`，让他再记一条「怎么查ID」的指令是多余的一步。
+        //    现在 `#绑定营地` 后面**没跟数字**就直接出那张教程图（见 bindWzryId 开头）。
         {
           reg: `${AT_HEAD}#绑定营地\\s*(.*)$`,
           fnc: 'bindWzryId'
@@ -331,6 +330,15 @@ export class AccountManager extends plugin {
     if (!userId) return
     // 指令与ID之间允许有空格：#绑定营地123 与 #绑定营地 123 等价
     const wzryId = stripAtText(e.msg).replace(/^#绑定营地\s*/, '').trim()
+
+    // ⭐ 只发 `#绑定营地`、后面什么都没跟 = **第一次来的用户不知道该填什么**。
+    //    直接出那张「营地ID从哪看」的教程图，别只甩一句「仅支持数字」让他自己猜
+    //    （原来那条 `#获取营地ID` 指令已删，教程图的入口就剩这一个）。
+    if (!wzryId) {
+      await this.howToGetWzryId(e)
+      return
+    }
+
     if (!/^\d+$/.test(wzryId)) {
       await e.reply(['营地ID仅支持数字，示例: #绑定营地123 或 #绑定营地 123', Button.bind()])
       return

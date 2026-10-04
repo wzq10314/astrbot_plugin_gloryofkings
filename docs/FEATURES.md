@@ -1,6 +1,6 @@
 # 功能与路由清单
 
-本清单按 v1.0.8 实际加载后生成的 [routes.json](../routes.json) 重建。上游基准为 `5decf0398463433f0e67fddb85c01592ece76fce`（2026-10-01）。
+本清单按 v1.0.10 实际加载后生成的 [routes.json](../routes.json) 重建。上游基准为 `3f4d4a33590099d41c6cc499a30de6bb3da25f20`（2026-10-04）。
 
 上游 41 个模块、106 条路由，AstrBot 管理适配新增 1 个模块、2 条路由，合计 **42 个模块、108 条路由**；图片资源包含 **34 份 HTML 模板**。LLM 工具和 Python 依赖管理命令另计。
 
@@ -14,6 +14,9 @@
 | campImDeploy.js | `connectRemote` | master |
 | campImDeploy.js | `deploy` | master |
 | campImDeploy.js | `status` | master |
+| help.js | `showHelp` | 普通用户 |
+| help.js | `showSubHelp` | 普通用户 |
+| help.js | `showMasterPanel` | master |
 | watchDeploy.js | `connect` | master |
 | watchDeploy.js | `connectRemote` | master |
 | watchDeploy.js | `deploy` | master |
@@ -81,7 +84,6 @@
 | watchBattle.js | `startHinted` | 普通用户 |
 | whoIsPlaying.js | `list` | 普通用户 |
 | accountManager.js | `myWzryId` | 普通用户 |
-| accountManager.js | `howToGetWzryId` | 普通用户 |
 | accountManager.js | `bindWzryId` | 普通用户 |
 | accountManager.js | `switchWzryId` | 普通用户 |
 | accountManager.js | `deleteWzryId` | 普通用户 |
@@ -93,8 +95,6 @@
 | accountManager.js | `clearHiddenProfiles` | master |
 | allSeasonPerformance.js | `allRank` | 普通用户 |
 | allSeasonPerformance.js | `allPeak` | 普通用户 |
-| help.js | `showHelp` | 普通用户 |
-| help.js | `showMasterPanel` | master |
 | myKingHomepage.js | `allKingHomepage` | 普通用户 |
 | myKingHomepage.js | `myKingHomepage` | 普通用户 |
 | peakPerformance.js | `peakPerformance` | 普通用户 |
@@ -144,7 +144,7 @@
 
 公告默认每两小时第 53 分检查一次，`gameNewsCron` 留空时关闭自动推送并保留手动查询。个人和群月报的 cron 在 28—31 日触发，业务逻辑只在当月最后一天实际推送。
 
-此外保留上游非 cron 后台工作：营地消息短轮询（`campImPollMs`，默认 3000 毫秒）、观战开播提示轮询（`watchHintPollMs`，默认 15000 毫秒），以及安装/更新后的共享库接入提醒。它们按各自配置、服务状态和记录决定是否执行，不计入上述 11 个 cron 任务。
+此外保留上游非 cron 后台工作：营地消息短轮询（`campImPollMs`，默认 3000 毫秒），以及安装/更新后的共享库接入提醒。它们按各自配置、服务状态和记录决定是否执行，不计入上述 11 个 cron 任务。独立观战开播提示轮询在当前上游中保持停用，提示检查随战绩轮询执行。
 
 ## 上游说明
 

@@ -142,6 +142,15 @@ class Tool(unittest.IsolatedAsyncioTestCase):
         self.assertIn('仅限 AstrBot 管理员',answer)
 
 class Validation(unittest.TestCase):
+    def test_new_section_help_and_binding_tutorial_routes(self):
+        for text in ['绑定营地','查询战绩帮助','英雄相关帮助','皮肤帮助','营地ID共享帮助',
+                     '营地观战帮助','营地消息帮助','战绩推送帮助','群战绩报告帮助','王者对比 12345678']:
+            with self.subTest(command=text):
+                self.assertEqual(commands.normalize(text),'#'+text)
+        for text in ['对比','对比 12345678','获取营地ID','怎么看营地ID']:
+            with self.subTest(removed_command=text),self.assertRaises(ValueError):
+                commands.normalize(text)
+
     def test_query_and_mutation_examples_are_routable(self):
         for text in ['查询战绩','英雄攻略 妲己','绑定营地 77777001','开启战绩推送',
                      '皮肤上新','营地QQ全局登录','王者帮助','营地ID共享状态','巅峰趋势 14',
