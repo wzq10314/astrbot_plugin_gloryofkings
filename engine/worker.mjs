@@ -50,28 +50,30 @@ globalThis.plugin=class {
 };
 const media=(type,file)=>({type,data:{file:Buffer.isBuffer(file)?'base64://'+file.toString('base64'):file}});
 globalThis.segment={image:file=>media('image',file),video:file=>media('video',file),record:file=>media('record',file),
-  text:text=>({type:'text',data:{text}}),at:qq=>({type:'at',data:{qq}}),button:()=>null};
+  text:text=>({type:'text',data:{text}}),at:qq=>({type:'at',data:{qq}}),
+  button:(...rows)=>initial.official?{type:'button',rows}:null};
 const api=(action,params={})=>call('onebot',{action,params});
-function mapOf(rows,key){return new Map(rows.map(row=>[Number(row[key]),row]))}
+const idKey=value=>initial.official?String(value):Number(value);
+function mapOf(rows,key){return new Map(rows.map(row=>[idKey(row[key]),row]))}
 function party(kind,id){
   id=String(id);
-  const p={sendMsg:message=>call('send',{kind,id,message}),
-    sendFile:(file,name)=>call('upload',{kind,id,file,name}),
+  const p={sendMsg:message=>call('send',{kind,id,message,event_ref:events.getStore()?.event_ref}),
+    sendFile:(file,name)=>call('upload',{kind,id,file,name,event_ref:events.getStore()?.event_ref}),
     recallMsg:message_id=>api('delete_msg',{message_id}),getMsg:message_id=>api('get_msg',{message_id}),
-    getAvatarUrl:()=>kind==='group'?`https://p.qlogo.cn/gh/${id}/${id}/640/`:`https://q1.qlogo.cn/g?b=qq&nk=${id}&s=640`};
+    getAvatarUrl:()=>initial.official?'':kind==='group'?`https://p.qlogo.cn/gh/${id}/${id}/640/`:`https://q1.qlogo.cn/g?b=qq&nk=${id}&s=640`};
   p.fs={upload:p.sendFile};
   if(kind==='group'){
     p.getMemberMap=async()=>{
       const rows=await api('get_group_member_list',{group_id:id});
-      const map=mapOf(rows,'user_id');Bot.gml.set(Number(id),map);return map;
+      const map=mapOf(rows,'user_id');Bot.gml.set(idKey(id),map);return map;
     };
-    p.pickMember=user_id=>({info:Bot.gml.get(Number(id))?.get(Number(user_id)),
+    p.pickMember=user_id=>({info:Bot.gml.get(idKey(id))?.get(idKey(user_id)),
       getInfo:()=>api('get_group_member_info',{group_id:id,user_id:String(user_id),no_cache:true}),
-      getAvatarUrl:()=>`https://q1.qlogo.cn/g?b=qq&nk=${user_id}&s=640`});
+      getAvatarUrl:()=>initial.official?'':`https://q1.qlogo.cn/g?b=qq&nk=${user_id}&s=640`});
   }
   return p;
 }
-globalThis.Bot={adapter:{name:'OneBotv11'},uin:Number(initial.self_id),gl:new Map(),gml:new Map(),
+globalThis.Bot={adapter:{name:initial.official?'QQOfficial':'OneBotv11'},uin:idKey(initial.self_id),gl:new Map(),gml:new Map(),
   pickGroup:id=>party('group',id),pickFriend:id=>party('private',id),pickUser:id=>party('private',id),
   sendApi:api,recallMsg:message_id=>api('delete_msg',{message_id}),getMsg:message_id=>api('get_msg',{message_id}),
   makeForwardMsg:async rows=>({type:'forward',rows}),
@@ -85,7 +87,7 @@ function makeEvent(data){
   if(e.isGroup)e.group=party('group',e.group_id);
   e.reply=async(message,quote=false)=>{
     const result=await call('send',{kind:e.isGroup?'group':'private',id:e.isGroup?e.group_id:e.user_id,
-      message,reply_id:quote?e.message_id:null});
+      message,reply_id:quote?e.message_id:null,event_ref:e.event_ref});
     const describe=value=>{
       if(typeof value==='string')return value.slice(0,3000);
       if(Array.isArray(value))return value.map(describe).filter(Boolean).join('\n');
@@ -110,8 +112,10 @@ function matches(e){
 async function handle(x){
   if(x.op==='inventory')return inventory();
   if(x.op==='groups'){
+    // Official observed sessions must never become an authoritative member snapshot.
+    if(initial.official)return false;
     Bot.gl=mapOf(x.data.groups,'group_id');
-    for(const [gid,rows] of Object.entries(x.data.members))Bot.gml.set(Number(gid),mapOf(rows,'user_id'));
+    for(const [gid,rows] of Object.entries(x.data.members))Bot.gml.set(idKey(gid),mapOf(rows,'user_id'));
     for(const gid of Bot.gml.keys())if(!Bot.gl.has(gid))Bot.gml.delete(gid);
     return true;
   }
@@ -130,6 +134,11 @@ async function handle(x){
       if(rule.permission==='master'&&!e.isMaster){await e.reply('此命令仅限 AstrBot 管理员使用。');return {handled:true,messages:e.bridgeOutput};}
       if(['admin','owner'].includes(rule.permission)&&!e.isMaster&&
           !(e.isGroup&&['admin','owner'].includes(e.sender?.role))){await e.reply('此命令仅限群主、群管理员或 AstrBot 管理员使用。');return {handled:true,messages:e.bridgeOutput};}
+      if(initial.official&&(file==='groupReport.js'||file==='whoIsPlaying.js'||
+          (file==='rankList.js'&&rule.fnc==='groupRank'))){
+        await e.reply('QQ 官方接口未提供完整群成员表，暂不能生成全群排名、群报或全群在线名单。个人查询、总排名和用户主动开启的个人推送仍可使用。');
+        return {handled:true,messages:e.bridgeOutput};
+      }
       const value=await app[rule.fnc](e);
       if(value!==false)return {handled:true,messages:e.bridgeOutput.slice(0,20)};
     }
@@ -156,13 +165,14 @@ try {
   // AstrBot-specific management replaces the Guoba page, with the same persistent stores.
   const {default:Management}=await import('./management.mjs');entries.unshift(['astrbotManagement.js',new Management()]);
   if(initial.schedules!==false)for(const [file,app] of entries){
+    if(initial.official&&file==='groupReport.js')continue;
     for(const task of (Array.isArray(app.task)?app.task:[app.task]).filter(t=>t?.cron&&t?.fnc)){
       let running=false;
       const job=schedule.scheduleJob({rule:task.cron,tz:'Asia/Shanghai'},async()=>{
         if(running)return;running=true;
         try{
           const run=()=>typeof task.fnc==='function'?task.fnc():app[task.fnc]();
-          if(['gameRecordPush.js','battleReport.js'].includes(file)){
+          if(!initial.official&&['gameRecordPush.js','battleReport.js'].includes(file)){
             const targets=()=>Object.entries(pushStore.loadPushList()).map(([qq,sub])=>[qq,pushStore.subGroups(sub)]);
             const before=JSON.stringify(targets());
             const ids=JSON.parse(before).flatMap(([,groups])=>groups);

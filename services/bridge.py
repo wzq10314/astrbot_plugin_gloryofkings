@@ -12,6 +12,8 @@ from urllib.parse import unquote, urlsplit
 
 from astrbot.api import logger
 from .runtime import prepare_runtime
+from .shared_auth import adapt_shared_query_auth
+from .help_buttons import adapt_help_buttons
 from ..utils.http import PublicHTTP
 
 ENGINE = Path(__file__).resolve().parent.parent / 'engine'
@@ -23,6 +25,7 @@ class BridgeError(Exception):
 
 
 class Bridge:
+    official = False
     def __init__(self, plugin, bot, platform_id, self_id):
         self.plugin, self.bot = plugin, bot
         self.platform_id, self.self_id = str(platform_id), str(self_id)
@@ -60,6 +63,9 @@ class Bridge:
             overrides=json.loads(self.plugin.settings.get('bot_overrides','{}')).get(self.self_id,{})
             settings={**self.plugin.settings, **overrides}
             prepare_runtime(ENGINE, self.root, settings, self.plugin.host_blacklist())
+            if self.official:
+                adapt_help_buttons(ENGINE, self.root)
+                adapt_shared_query_auth(ENGINE, self.root, settings, self.plugin.data)
             self.ready = asyncio.get_running_loop().create_future()
             node = shutil.which(self.plugin.settings.get('engine_node') or 'node')
             if not node:
@@ -77,7 +83,7 @@ class Bridge:
             self.track(self.read_loop())
             self.track(self.drain_errors())
             await self.write({'type':'start','root':str(self.root),'self_id':self.self_id,
-                              'admins':self.plugin.admins()})
+                              'admins':self.plugin.admins(), 'official':self.official})
             try:
                 async with asyncio.timeout(50):
                     await self.ready

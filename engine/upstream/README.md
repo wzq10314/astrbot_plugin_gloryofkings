@@ -11,7 +11,7 @@ Yunzai-Bot V3 的王者荣耀插件：战绩查询、赛季表现、皮肤墙、
 </div>
 
 > [!NOTE]
-> 本仓库是 [@Tloml-Starry/GloryOfKings-Plugin](https://gitee.com/Tloml-Starry/GloryOfKings-Plugin) 的 Fork，新增皮肤墙、常用英雄、称号墙、趋势图等功能，补齐了原插件只有配置项没实现的**战绩推送 / 上下线提醒**；营地接口参考 [@KimigaiiWuyi/WzryUID](https://github.com/KimigaiiWuyi/WzryUID)，原插件版权与协议归原作者所有。
+> 王者营地查询插件：战绩查询、王者主页、皮肤墙、常用英雄、称号墙、趋势图，以及战绩推送 / 上下线提醒。
 > 数据全部来自腾讯《王者荣耀》官方（游戏客户端、王者营地 App 及接口），版权归腾讯所有，这里只是把公开接口做成便于查询的形式，**与本人无关**；数据可能有延迟、缺漏或偏差，请以游戏内和营地 App 为准。**仅供参考、请勿商用**，使用本插件产生的后果由使用者自行承担。
 
 ## 安装
@@ -239,7 +239,6 @@ cd ./plugins/GloryOfKings-Plugin && pnpm install
 
 ## 致谢与协议
 
-- [@Tloml-Starry/GloryOfKings-Plugin](https://gitee.com/Tloml-Starry/GloryOfKings-Plugin) —— 原插件；
 -  [@KimigaiiWuyi/WzryUID](https://github.com/KimigaiiWuyi/WzryUID) —— 营地接口调用逻辑参考；数据来自王者营地与王者荣耀官网资料库
 
-  [MIT](LICENSE) © 2026 cchanlan · 本仓库为 Fork，原插件版权归原作者所有，在此一并致谢。觉得有用点个 Star ⭐
+  [MIT](LICENSE) © 2026 cchanlan。觉得有用点个 Star ⭐

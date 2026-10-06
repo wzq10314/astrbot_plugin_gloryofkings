@@ -10,12 +10,13 @@ from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter as event_filter
 from astrbot.api.star import Context, Star, StarTools, register
 from .services.bridge import Bridge, BridgeError, ENGINE
+from .services.official import OfficialBridge, PLATFORMS as OFFICIAL_PLATFORMS, account_id
 from .services.dependencies import EngineDependencies
 from .services.tool_commands import normalize as normalize_tool_command
 from .services.tool_commands import private_only, PRIVATE_NOTICE
 
 
-@register('astrbot_plugin_gloryofkings', 'wzq10314', '王者营地全功能核心 AstrBot 适配', '1.0.10')
+@register('astrbot_plugin_gloryofkings', 'wzq10314', '王者营地全功能核心 AstrBot 适配', '1.0.14')
 class GloryOfKingsPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -44,7 +45,7 @@ class GloryOfKingsPlugin(Star):
     def admins(self):
         values = self.context.get_config().get('admins_id', [])
         values = [*values, *self.settings.get('admins', [])]
-        return sorted({str(value) for value in values if str(value).isdigit()})
+        return sorted({str(value).strip() for value in values if str(value).strip()})
 
     def host_blacklist(self):
         return [str(v) for v in self.context.get_config().get('platform_settings', {}).get('blacklist', [])]
@@ -72,19 +73,36 @@ class GloryOfKingsPlugin(Star):
         self.install_task = self.track(run())
         return '已开始后台准备依赖，完成后可直接使用王者命令。请发送 #王者依赖状态 查看进度。'
 
-    async def bridge_for(self, bot, platform_id, self_id):
+    async def bridge_for(self, bot, platform_id, self_id, official=False):
         key = (str(platform_id), str(self_id))
         bridge = self.bridges.get(key)
         if bridge is None:
-            bridge = self.bridges[key] = Bridge(self, bot, *key)
+            bridge_type = OfficialBridge if official else Bridge
+            bridge = self.bridges[key] = bridge_type(self, bot, *key)
         bridge.bot = bot
         await bridge.start()
+        return bridge
+
+    async def event_bridge(self, event, data):
+        official = event.get_platform_name() in OFFICIAL_PLATFORMS
+        self_id = account_id(event) if official else event.message_obj.self_id
+        bridge = await self.bridge_for(event.bot, event.get_platform_id(), self_id, official=official)
+        if official:
+            data['event_ref'] = bridge.observe(event)
         return bridge
 
     async def supervise(self):
         while True:
             if self.dependencies.ready:
                 for platform in self.context.platform_manager.get_insts():
+                    if platform.meta().name in OFFICIAL_PLATFORMS:
+                        for self_id in OfficialBridge.saved_accounts(self.data, platform.meta().id):
+                            try:
+                                await self.bridge_for(platform.get_client(), platform.meta().id, self_id, official=True)
+                            except asyncio.CancelledError: raise
+                            except Exception as error:
+                                logger.warning('GloryOfKings official startup: %s', type(error).__name__)
+                        continue
                     if platform.meta().name != 'aiocqhttp': continue
                     bot = platform.get_client()
                     # One reverse-WS adapter may carry several QQ accounts.
@@ -104,10 +122,26 @@ class GloryOfKingsPlugin(Star):
         raw = raw if isinstance(raw, dict) else {}
         segments = raw.get('message', [])
         segments = segments if isinstance(segments, list) else []
+        if event.get_platform_name() in OFFICIAL_PLATFORMS:
+            # Official raw_message is a botpy object, not a OneBot message dictionary.
+            segments = []
+            for component in event.get_messages():
+                kind = str(getattr(getattr(component, 'type', ''), 'value', getattr(component, 'type', ''))).lower()
+                if kind == 'plain':
+                    segments.append({'type':'text', 'data':{'text':component.text}})
+                elif kind == 'at':
+                    segments.append({'type':'at', 'data':{'qq':str(component.qq)}})
+                elif kind == 'reply':
+                    segments.append({'type':'reply', 'data':{'id':str(component.id)}})
         text = ''.join(str(s.get('data', {}).get('text', '')) for s in segments if s.get('type')=='text').strip()
         text = text or event.get_message_str().strip()
         self_id = str(event.message_obj.self_id)
         ats = [str(s.get('data', {}).get('qq', '')) for s in segments if s.get('type')=='at']
+        target_at = next((a for a in ats if a != self_id), '')
+        atme = self_id in ats
+        if event.get_platform_name() in OFFICIAL_PLATFORMS and target_at:
+            # Official group messages also mention the bot; retain a real other-user mention.
+            atme = False
         reply = next((s.get('data', {}).get('id') for s in segments if s.get('type')=='reply'), None)
         is_master = str(event.get_sender_id()) in self.admins() or event.is_admin()
         sender = dict(raw.get('sender') or {})
@@ -116,13 +150,13 @@ class GloryOfKingsPlugin(Star):
             'isGroup':not event.is_private_chat(),'isMaster':bool(is_master),'sender':sender,
             'group_name':raw.get('group_name',''),'message_id':str(event.message_obj.message_id),
             'message':[{'type':s['type'],**s.get('data',{})} for s in segments],
-            'at':next((a for a in ats if a!=self_id),''),'atme':self_id in ats,'atBot':self_id in ats,
+            'at':target_at,'atme':atme,'atBot':self_id in ats,
             'reply_id':str(reply) if reply is not None else None,
             'source':{'message_id':str(reply)} if reply is not None else None}
 
     @event_filter.event_message_type(event_filter.EventMessageType.ALL, priority=5)
     async def on_message(self, event: AstrMessageEvent):
-        if event.get_platform_name() != 'aiocqhttp': return
+        if event.get_platform_name() not in {'aiocqhttp', *OFFICIAL_PLATFORMS}: return
         data = self.event_data(event)
         text = data['msg']
         if not text or str(data['user_id'])==str(event.message_obj.self_id): return
@@ -146,9 +180,10 @@ class GloryOfKingsPlugin(Star):
                 event.stop_event()
                 await event.send(event.plain_result(self.dependencies.message+'\n管理员可发送 #王者依赖状态 查看进度。'))
             return
-        busy_key=(event.get_platform_id(),str(event.message_obj.self_id),data['user_id'])
+        self_id = account_id(event) if event.get_platform_name() in OFFICIAL_PLATFORMS else str(event.message_obj.self_id)
+        busy_key=(event.get_platform_id(),self_id,data['user_id'])
         try:
-            bridge=await self.bridge_for(event.bot,event.get_platform_id(),event.message_obj.self_id)
+            bridge=await self.event_bridge(event,data)
             if not await bridge.request('match',data,timeout=10): return
             event.stop_event()
             if busy_key in self.user_busy:
@@ -207,7 +242,7 @@ class GloryOfKingsPlugin(Star):
             command(string): 单条规范命令，不是自然语言原句，可不带#。例如：查询战绩、英雄攻略 妲己、开启战绩推送。
         """
         if not self.settings.get('llm_enabled',True):return '未执行：管理员已关闭王者自然语言工具。'
-        if event.get_platform_name()!='aiocqhttp':return '未执行：此插件支持 OneBot11/NapCat。'
+        if event.get_platform_name() not in {'aiocqhttp', *OFFICIAL_PLATFORMS}:return '未执行：此插件支持 QQ 官方机器人及 OneBot11/NapCat。'
         try: text=normalize_tool_command(command)
         except ValueError as error:return '未执行：'+str(error)
         if not event.is_private_chat() and private_only(text):return '未执行：'+PRIVATE_NOTICE
@@ -220,12 +255,13 @@ class GloryOfKingsPlugin(Star):
         if cache is None:cache={};setattr(event,'_gok_tool_cache',cache)
         if text in cache:return '本条消息已执行过，未重复调用。\n'+cache[text]
         if len(cache)>=5:return '未执行：本条消息最多调用 5 次王者工具。'
-        key=(event.get_platform_id(),str(event.message_obj.self_id),data['user_id'])
+        self_id = account_id(event) if event.get_platform_name() in OFFICIAL_PLATFORMS else str(event.message_obj.self_id)
+        key=(event.get_platform_id(),self_id,data['user_id'])
         if key in self.user_busy:return '未执行：你的上一条王者命令正在处理中。'
         self.user_busy.add(key)
         cache[text]='正在处理，请勿重复调用。'
         try:
-            bridge=await self.bridge_for(event.bot,event.get_platform_id(),event.message_obj.self_id)
+            bridge=await self.event_bridge(event,data)
             async with self.command_slots:
                 result=await bridge.request('event',data)
             messages='\n'.join(result.get('messages',[])).strip()
@@ -244,7 +280,7 @@ class GloryOfKingsPlugin(Star):
         if time.monotonic()-timestamp<300 and text: return text
         manifest=json.loads((Path(__file__).parent/'UPSTREAM.json').read_text(encoding='utf-8'))
         current=manifest['commit']
-        prefix=f'AstrBot 适配版 1.0.10\n上游：{manifest["repository"]}\n本版基准：{current[:12]}'
+        prefix=f'AstrBot 适配版 1.0.14\n上游：{manifest["repository"]}\n本版基准：{current[:12]}'
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15),trust_env=True) as client:
                 async with client.get('https://gitee.com/api/v5/repos/longhengmu/GloryOfKings-Plugin/commits',params={'sha':'master','per_page':5}) as response:

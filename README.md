@@ -4,10 +4,11 @@
 
 GloryOfKings-Plugin 的 AstrBot 适配版
 
-![Version](https://img.shields.io/badge/version-1.0.10-blue)
+![Version](https://img.shields.io/badge/version-1.0.14-blue)
 ![AstrBot](https://img.shields.io/badge/AstrBot-4.28.1%2B-purple)
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
 ![OneBot](https://img.shields.io/badge/OneBot11-NapCat-green)
+![QQ官方](https://img.shields.io/badge/QQ官方-群聊%20%2F%20C2C-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Views](https://komarev.com/ghpvc/?username=wzq10314-astrbot-plugin-gloryofkings&label=Views&color=blue)
 
@@ -15,9 +16,9 @@ GloryOfKings-Plugin 的 AstrBot 适配版
 
 </div>
 
-这是基于 [longhengmu/GloryOfKings-Plugin](https://gitee.com/longhengmu/GloryOfKings-Plugin) 的完整业务核心适配项目。保留上游 **41 个模块、106 条命令路由、34 份 HTML 模板**，通过常驻 Node 核心对接 AstrBot 的消息、权限、数据目录及后台任务。连同 AstrBot 管理适配，实际加载 **42 个模块、108 条路由**，另提供 `glory_of_kings` LLM 工具和 Python 依赖管理命令。
+这是基于 [longhengmu/GloryOfKings-Plugin](https://gitee.com/longhengmu/GloryOfKings-Plugin) 的业务核心适配项目，通过常驻 Node 核心对接 AstrBot 的消息、权限、数据目录及后台任务，并提供 `glory_of_kings` LLM 工具和 Python 依赖管理命令。当前打包的命令见 `routes.json`，各平台的可用范围见下文。
 
-本版基准提交：[`3f4d4a335900`](https://gitee.com/longhengmu/GloryOfKings-Plugin/commit/3f4d4a33590099d41c6cc499a30de6bb3da25f20)，同步于 2026-10-04。后续更新、问题修复以此仓库的提交为上游依据。
+本版上游基准提交：[`92fc3a47f433`](https://gitee.com/longhengmu/GloryOfKings-Plugin/commit/92fc3a47f433188e547619545c0334ee1e921122)，来源清单见 `UPSTREAM.json`。v1.0.14 包含 QQ 官方平台适配、帮助按钮和可选的跨机器人查询登录态复用。
 
 > 观战直播、营地消息及共享库的客户端已接入。它们所需的服务端由上游作者单独分发，不包含在公开仓库中，需自行取得服务地址和接入令牌。本包没有伪造接口或附送私人密钥。营地游戏数据查询需要有效登录态，并受接口权限、隐私设置及频控影响；官网公告查询无需营地登录。
 
@@ -25,7 +26,7 @@ GloryOfKings-Plugin 的 AstrBot 适配版
 
 仓库地址：[https://github.com/wzq10314/astrbot_plugin_gloryofkings](https://github.com/wzq10314/astrbot_plugin_gloryofkings)。可在 AstrBot 插件管理中使用该 Git 仓库地址安装，或从 [Releases](https://github.com/wzq10314/astrbot_plugin_gloryofkings/releases) 下载 ZIP。
 
-1. 在 AstrBot 后台的插件管理中上传 `astrbot_plugin_gloryofkings-v1.0.10.zip`，然后启用插件。
+1. 在 AstrBot 后台的插件管理中安装仓库，或上传 `astrbot_plugin_gloryofkings-v1.0.14.zip`，然后启用插件。
 2. 环境需要 **Python 3.12、Node.js 22+、npm**。Python 依赖随安装包安装，Node 依赖首次启动自动准备。已安装 RConsole 的机器可以复用系统 Node 和 Chromium；两个插件的数据、账号和依赖目录独立。
 3. 管理员私聊机器人发送 `#王者依赖状态`。浏览器就绪的判断包含一次真实启动和截图。未就绪时可发 `#王者浏览器安装`，依赖安装失败时可发 `#王者依赖安装`。
 4. 先发 `#王者帮助` 检查图片，再按下方步骤登录和绑定。
@@ -35,6 +36,12 @@ GloryOfKings-Plugin 的 AstrBot 适配版
 手动安装时，解压后的目录应为 `/AstrBot/data/plugins/astrbot_plugin_gloryofkings/main.py`，不能再套一层同名目录。保存后重载插件。详细说明见 [安装与排错](docs/INSTALL.md)。
 
 ## 帮助菜单
+
+支持 OneBot11/NapCat，以及 AstrBot 的 `qq_official`、`qq_official_webhook` 群聊和 C2C 私聊。QQ 官方身份使用 OpenID，并按平台和机器人独立保存路由、绑定和运行状态。只向机器人实际接收过消息的会话投递；主动推送还取决于 QQ 官方权限和消息额度。
+
+QQ 官方支持个人查询、总排名、扫码及用户主动订阅的个人推送。平台没有完整群成员表，涉及全群成员的群报、群排名和全群在线名单会明确提示不可用；任意历史消息读取和 OneBot 专属操作也不提供。营地好友与消息功能继续遵循私聊及账号归属限制。
+
+QQ 官方图文和交互按钮可配合 `astrbot_plugin_official_cards` 使用；按钮回调、图片公开地址及翻页需要该插件和平台相应能力。OneBot 用户继续使用图片、命令和自然语言入口。`official_query_auth_namespace` 与 `official_query_auth_accounts` 默认留空，仅在管理员明确选择本安装中的来源账号后才复用其查询登录态；它不合并私人营地消息或会话数据。
 
 发送 `#王者帮助` 获取三列主菜单，按需使用以下子帮助查看完整命令；这些帮助也支持自然语言调用。
 
@@ -189,6 +196,8 @@ v1.0.9 的观战/IM 服务状态查询只读取现状；没有运行中的守护
 - 普通 OneBot11 不显示原版 QQ 官方机器人交互按钮，功能可通过对应命令或自然语言调用。
 
 ## 验证范围
+
+v1.0.14 的发布核对以当前源码、配置结构和可运行的离线测试为准。以下记录属于其各自版本，不代表当前版本重新完成了真实 QQ 投递、扫码或外置服务端到端验证。
 
 v1.0.10 的分块帮助、实际图片渲染、命令路由和服务接入错误分类验证见 [本版验证记录](docs/VALIDATION-v1.0.10.md)。以下旧版本记录保留各自执行日期和范围。
 

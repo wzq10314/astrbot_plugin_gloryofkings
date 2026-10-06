@@ -41,7 +41,9 @@ function setup (userYaml) {
   fs.mkdirSync(path.join(TMP, 'components'), { recursive: true })
   fs.mkdirSync(path.join(TMP, 'config', 'config'), { recursive: true })
   fs.mkdirSync(path.join(TMP, 'config', 'default_config'), { recursive: true })
-  for (const f of ['Config.js', 'YamlReader.js', 'Path.js']) {
+  // ⚠️ 用**扫描**而不是写死文件名：Config.js 的依赖会随重构变动
+  //    （实例：拆出 objectUtils.js 后写死的清单没跟上，4 个用例全报 ERR_MODULE_NOT_FOUND）
+  for (const f of fs.readdirSync(path.join(PLUGIN, 'components')).filter(n => n.endsWith('.js'))) {
     fs.copyFileSync(path.join(PLUGIN, 'components', f), path.join(TMP, 'components', f))
   }
   for (const f of ['config.yaml', 'auth.yaml']) {

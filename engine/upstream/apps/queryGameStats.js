@@ -1,3 +1,28 @@
+/**
+ * 战绩查询：`#战绩` / `#排位战绩` / `#巅峰战绩` / `#查询N战绩` / `#查战绩 <英雄>`。
+ *
+ * ## 五种指令怎么分流
+ *
+ * 五条 rule 都收敛到 `handleQuery`（英雄那条除外），区别只在「查谁」和「查什么」：
+ *
+ * | 指令 | 目标账号 | 模式 | 用途 |
+ * |---|---|---|---|
+ * | `#战绩` | 自己（或 @ 的人） | 全部 | 最近 30 场列表 |
+ * | `#排位战绩` / `#巅峰战绩` | 同上 | 排位 / 巅峰 | 服务端 option 精确筛 |
+ * | `#查询2战绩` | 绑定列表里第 2 个 | 全部 | 多账号切换 |
+ * | `#查询2排位战绩3` | 第 2 个 | 排位 | 再看第 3 场详情 |
+ * | `#查战绩 妲己` | 同上 | 全部 | 按英雄筛（边翻边筛） |
+ *
+ * 「纯数字」这个位置是**双关**的：≤ 9999 当绑定列表序号，> 9999 当营地 ID 直传。
+ * 营地 ID 是 9～10 位数，序号不会有人绑到 9999 个，这个界不会误判。
+ *
+ * ## 为什么英雄查询要「边翻边筛」
+ *
+ * 服务端一页固定 30 场，没有按英雄筛的接口。早先的做法是「先翻满 100 场再筛」，
+ * 冷门英雄（实测孙权近 100 场只有 10 场）就只出 10 条，看着像被截断。
+ * 现在把判据传给翻页循环：**命中满 30 场就收手**，热门英雄两三页就够，
+ * 只有真冷门的才翻到 300 场上限。
+ */
 import fs from 'node:fs'
 import path from 'path'
 import puppeteer from '../../../lib/puppeteer/puppeteer.js'
@@ -8,15 +33,19 @@ import { estimateRequestSeconds } from '../utils/api.js'
 import { fetchBattleDetail, renderBattleDetail, resolveMvp, resolveEvaluate, buildKillTags } from '../utils/battleDetailImage.js'
 import { resolveHero } from '../utils/heroName.js'
 
-// 战绩模式筛选走服务端 option 参数（取值见 morebattlelist 响应里的 options 字段）。
-// 各模式的 gametype/battleType 实测值：
-//   排位 gametype=4（mapName「排位赛 双排/五排」）
-//   巅峰 gametype=14 battleType=32（mapName「巅峰赛」）
+/**
+ * 战绩模式 → 服务端 `option` 参数。
+ *
+ * 取值来自 `morebattlelist` 响应里的 `options` 字段，实测：
+ *   排位 gametype=4（mapName「排位赛 双排/五排」）
+ *   巅峰 gametype=14 battleType=32（mapName「巅峰赛」）
+ */
 const MODE_MAP = [
   { key: '排位', option: 1 },
   { key: '巅峰', option: 4 }
 ]
 
+/** 按中文名取模式，认不出返回 null（当「全部」处理） */
 const findMode = key => MODE_MAP.find(m => m.key === key) || null
 
 /**
@@ -40,8 +69,9 @@ const matchHero = (item, heroId, matchedName) => {
   return false
 }
 
-// 服务端一页固定 30 场。宽筛模式过滤后可能不足，用 lastTime 游标往前翻页补齐。
+/** 一页固定 30 场，也是列表图默认展示的场数 */
 const TARGET_COUNT = 30
+
 /**
  * 英雄战绩要翻到多少场为止。
  *
@@ -64,7 +94,7 @@ const MAX_PAGES = 30
 const MODE_MAX_PAGES = 4
 
 export class QueryGameStats extends plugin {
-  constructor() {
+  constructor () {
     super({
       name: '查询王者战绩',
       dsc: '查询战绩',
@@ -84,6 +114,8 @@ export class QueryGameStats extends plugin {
           fnc: 'queryHeroStats'
         },
         {
+          // `(?!询|王)` 是必要的：否则 `#查询战绩` / `#王者战绩` 会先被这条吃掉，
+          // 而它是按英雄查的，会把「战绩」当成英雄名
           reg: `${AT_HEAD}#?查(?!询|王)\\s*(.*?)\\s*战\\s*绩\\s*$`,
           fnc: 'queryHeroStats'
         },
@@ -95,19 +127,19 @@ export class QueryGameStats extends plugin {
     })
   }
 
-  async queryGameStats(e) {
+  async queryGameStats (e) {
     return this.handleQuery(e, stripAtText(e.msg).replace(/^#?(查询|王者)战绩\s*/, ''), 0)
   }
 
   // #排位战绩 / #巅峰战绩 —— 后面可接场次序号或营地ID，如 #排位战绩3
-  async queryModeStats(e) {
+  async queryModeStats (e) {
     const [, key, rest = ''] = stripAtText(e.msg).match(/^#?(排位|巅峰)战绩\s*(.*)$/) || []
     return this.handleQuery(e, rest, 0, 0, findMode(key))
   }
 
   // #查询2战绩 —— 2 为绑定列表中的营地ID序号；数字大于 9999 时视为直接传营地ID
   // 后面仍可接模式与场次序号，如 #查询2排位战绩3
-  async queryGameStatsBySlot(e) {
+  async queryGameStatsBySlot (e) {
     const [, , num, key = '', rest = ''] = stripAtText(e.msg).match(/^#?(查询|王者)(\d+)(排位|巅峰)?战绩\s*(.*)$/) || []
     const value = Number(num)
     const mode = findMode(key)
@@ -117,7 +149,7 @@ export class QueryGameStats extends plugin {
     return this.handleQuery(e, rest, value, 0, mode)
   }
 
-  async queryHeroStats(e) {
+  async queryHeroStats (e) {
     const msg = stripAtText(e.msg)
     const heroName = (
       msg.match(/^#?查战绩\s*(.+)$/)?.[1] ||
@@ -229,9 +261,14 @@ export class QueryGameStats extends plugin {
   }
 
   /**
+   * 非英雄那几条指令的统一入口。
+   *
+   * @param {string} rawInput 指令里剩下的那段（可能是场次序号，也可能是空）
+   * @param {number} idSlot 绑定列表序号（1 起），0 表示用当前选中的账号
+   * @param {number} directId 直接传的营地 ID，0 表示没有
    * @param {object} [mode] 模式筛选（排位/巅峰），由指令前缀显式解析，null 表示全部
    */
-  async handleQuery(e, rawInput, idSlot = 0, directId = 0, mode = null) {
+  async handleQuery (e, rawInput, idSlot = 0, directId = 0, mode = null) {
     const { userId, hint } = await resolveTargetUserId(e)
     if (hint) return e.reply(hint)
     logger.debug(`用户 ${userId} 请求查询战绩...`)
@@ -306,6 +343,7 @@ export class QueryGameStats extends plugin {
       return
     }
 
+    // 带序号 = 要看那一场的详情图，不是列表
     if (index && index < 9999) {
       const battle = battleList.list[index - 1]
       if (!battle) {
@@ -361,7 +399,7 @@ export class QueryGameStats extends plugin {
    *   不给则按总场数判断（模式筛选那种服务端已经筛过的场景）。
    * @returns 与 morebattlelist 的 data 同构的对象，list 已按模式过滤
    */
-  async collectBattles(ID, userId, mode, { forcePaginate = false, match = null } = {}) {
+  async collectBattles (ID, userId, mode, { forcePaginate = false, match = null } = {}) {
     const option = mode?.option ?? 0
     const target = forcePaginate ? HERO_TARGET : TARGET_COUNT
     const pageLimit = forcePaginate ? MAX_PAGES : (mode ? MODE_MAX_PAGES : 1)
@@ -406,7 +444,8 @@ export class QueryGameStats extends plugin {
     return { ...root, list: collected.slice(0, target) }
   }
 
-  async getTargetInfo(e, userId) {
+  /** 拿头像与昵称。@ 了别人时昵称要按群名片查，不能拿对方 QQ 号当昵称 */
+  async getTargetInfo (e, userId) {
     // 头像统一走 getUserAvatar：官方 QQ 机器人的 user_id 是 openid 而非 QQ 号，
     // 直接拼 q1.qlogo.cn 会回落到默认头像，导致所有人都渲染成同一张图
     const qqAvatar = await getUserAvatar(e, userId)
@@ -419,7 +458,8 @@ export class QueryGameStats extends plugin {
     return { qqAvatar, nickname }
   }
 
-  getUserID(userInfo, userId) {
+  /** 取用户当前选中的营地 ID（没绑定返回 null） */
+  getUserID (userInfo, userId) {
     if (!userInfo?.ids?.length) {
       logger.debug(`用户 ${userId} 未绑定ID`)
       return null
@@ -427,6 +467,7 @@ export class QueryGameStats extends plugin {
     return userInfo.ids[userInfo.current]
   }
 
+  /** 把营地返回的战绩字段换成列表模板认的名字 */
   getBattleStats = ({ killcnt, deadcnt, assistcnt, gameresult }) => ({
     killCnt: killcnt,
     deadCnt: deadcnt,
@@ -434,7 +475,7 @@ export class QueryGameStats extends plugin {
     gameResult: { 1: '胜利', 2: '失败' }[gameresult] || gameresult
   })
 
-  // 单场战绩 → 列表模板需要的字段
+  /** 单场战绩 → 列表模板需要的字段 */
   toListItem = item => ({
     gameType: item.mapName,
     gameTime: item.gametime,
@@ -451,6 +492,7 @@ export class QueryGameStats extends plugin {
 
   getTags = ({ desc }) => (desc ? [desc] : [])
 
+  /** 最长连胜：扫一遍，遇「胜利」加一、遇「失败」归零，记下峰值 */
   calculateWinningStreak = results =>
     results.reduce(([max, current], result) =>
       result === '胜利'

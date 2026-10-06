@@ -1,6 +1,8 @@
 # 安装与排错
 
-目标环境：AstrBot 4.28.1 / Python 3.12 / OneBot11 / NapCat，Linux Docker 优先。
+目标环境：AstrBot 4.28.1 / Python 3.12，支持 OneBot11/NapCat 与 QQ 官方群聊、C2C 私聊，Linux Docker 优先。
+
+QQ 官方使用 AstrBot 的 `qq_official` 或 `qq_official_webhook` 适配器。图文交互按钮可配合 `astrbot_plugin_official_cards`；主动消息、媒体类型及消息额度由 QQ 平台权限决定。请先在目标会话与机器人交互，再开启推送。完整群成员表、全群报告和任意历史消息读取不在 QQ 官方支持范围内。
 
 ## 安装包
 

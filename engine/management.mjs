@@ -23,11 +23,11 @@ export default class Management extends plugin {
     }
     const a=auth.getAccount(id);
     if(!a)return e.reply('未找到该营地账号。');
-    if(action==='归属'&&(/^\d+$/.test(value)||value==='清空'))auth.upsertAccount({...a,ownerBotUserId:value==='清空'?'':value});
+    if(action==='归属'&&(value==='清空'||(Bot.adapter.name==='QQOfficial'?/^[^\s]{1,256}$/.test(value||''):/^\d+$/.test(value))))auth.upsertAccount({...a,ownerBotUserId:value==='清空'?'':value});
     else if(action==='全局'&&['开','关'].includes(value))auth.upsertAccount({...a,isGlobalDefault:value==='开'});
     else if(action==='消息'&&['开','关'].includes(value))im.setAccountEnabled(id,value==='开');
     else if(action==='删除'){im.setAccountEnabled(id,false);auth.removeAccount(id);}
-    else return e.reply('用法：#王者账号管理 列表 / 归属 营地ID QQ号 / 消息 营地ID 开或关 / 全局 营地ID 开或关 / 删除 营地ID');
+    else return e.reply('用法：#王者账号管理 列表 / 归属 营地ID 用户ID / 消息 营地ID 开或关 / 全局 营地ID 开或关 / 删除 营地ID');
     return e.reply('账号设置已保存。营地消息连接会在下一次轮询同步。');
   }
   async configure(e){

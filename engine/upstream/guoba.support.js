@@ -1,5 +1,6 @@
-import lodash from 'lodash'
 import { Config, PluginPath, PluginName } from '#components'
+// 只用 get / isEqual 两个函数，走 components 里的自带实现（lodash 从没写进 package.json）
+import { get, isEqual } from './components/objectUtils.js'
 import authStore from './utils/authStore.js'
 // ⚠️ 用具名导入，**不要用 `import * as`** —— 锅巴重新扫描时用带 query 的动态 import 加载本文件，
 //    那个上下文里命名空间导入会报 `does not provide an export named 'default'`，整个 support 载入失败
@@ -937,8 +938,8 @@ export function supportGuoba () {
             continue
           }
 
-          const currentValue = lodash.get(configMap[configName], configPath)
-          if (!lodash.isEqual(currentValue, data[key])) {
+          const currentValue = get(configMap[configName], configPath)
+          if (!isEqual(currentValue, data[key])) {
             Config.modify(configName, configPath, data[key])
           }
         }

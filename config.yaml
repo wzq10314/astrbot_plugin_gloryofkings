@@ -55,3 +55,8 @@ watchCdnHttps: ""
 remoteAccountAllowedUrls: []
 
 gameNewsCron: '0 53 */2 * * *'
+
+# Optional: explicitly selected local account pool for query authentication.
+# Leave both fields empty unless an administrator has configured this feature.
+official_query_auth_namespace: ""
+official_query_auth_accounts: []

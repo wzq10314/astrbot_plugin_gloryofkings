@@ -1,9 +1,91 @@
+/**
+ * 配置读写与合并。
+ *
+ * ## 为什么不用 lodash / chokidar
+ *
+ * 原先 `mergeObjectsWithPriority` 靠 `lodash` 的 `isArray` / `isPlainObject` /
+ * `isEqual` / `mergeWith`，配置热重载靠 `chokidar` —— 但这两个包**都没写进
+ * `package.json` 的 dependencies**，它们是靠云崽根目录的 node_modules 才解析到的。
+ * 换个不带这两个包的框架、或者干净安装一次，插件在 `components/Config.js`
+ * 这一层就 `ERR_MODULE_NOT_FOUND` 直接起不来（配置是几乎所有功能的入口）。
+ * 现在两处依赖都换成自带实现：深比较与深合并约 80 行，热重载用内置 `node:fs`。
+ *
+ * ⚠️ `mergeObjectsWithPriority` 的行为**必须逐字节保持**：它的返回值会被
+ * `loadConfigFile` 逐个键写回用户的配置文件，合并语义偏一点就是在改用户的设置。
+ * 重写时配了差分测试（同一输入，新旧实现的返回值与写出的文件都要一致）。
+ */
 import YAML from 'yaml'
-import chokidar from 'chokidar'
 import fs from 'node:fs'
 import YamlReader from './YamlReader.js'
-import _ from 'lodash'
 import { PluginPath } from './Path.js'
+import { isPlainObject, isEqual, eq, isObjectLike, assignValue, safeGet } from './objectUtils.js'
+
+/**
+ * 按自定义规则深合并 —— 对应 `lodash.mergeWith`。
+ *
+ * 语义按 lodash 来：**只有 `customizer` 返回 `undefined` 时才走默认合并**。
+ * 本文件那个 customizer 的每个分支都会返回值，所以实际效果就是
+ * 「逐个键取 customizer 的结果」；仍保留 `undefined` 的回落分支，
+ * 免得以后有人改 customizer 时踩到语义差异。
+ *
+ * ⚠️ 赋值短信用 `SameValueZero`（`===` + `NaN`）而不是深比较 —— 这是 lodash
+ *    `assignMergeValue` 的实际行为。值只是**深相等**时它仍会覆盖（换成源对象的
+ *    引用），用深比较会少赋一次。内容一样，但差分测试比的是行为，别自作聪明。
+ *
+ * `stack` 的作用与 lodash `baseMergeDeep` 一致：挡「默认合并分支」里的自引用。
+ * ⚠️ 但 customizer 每次递归都会**新开一份栈**（lodash 的 `mergeWith` 内部也是
+ *    自己 new Stack），所以真正带锚点成环的 YAML 两边一样会爆栈 —— 这里刻意
+ *    保持与旧实现一致，不做行为改进。插件自己的配置里没有任何锚点/别名。
+ *
+ * @param {object} target 合并目标（调用方传空对象）
+ * @param {object[]} sources
+ * @param {(objValue: unknown, srcValue: unknown, key: string, object: object, source: object, stack: WeakMap) => unknown} customizer
+ * @param {WeakMap<object, object>} [stack]
+ * @returns {object}
+ */
+function mergeWith (target, sources, customizer, stack = new WeakMap()) {
+  for (const source of sources) {
+    if (!source) continue
+    if (target === source) continue
+
+    for (const key of Object.keys(source)) {
+      const srcValue = safeGet(source, key)
+      const objValue = safeGet(target, key)
+
+      // 源值是对象时先查环（对应 baseMergeDeep 开头的 stacked 判断）
+      if (isObjectLike(srcValue)) {
+        const stacked = stack.get(srcValue)
+        if (stacked) {
+          assignValue(target, key, stacked)
+          continue
+        }
+      }
+
+      let newValue = customizer(objValue, srcValue, key, target, source, stack)
+
+      if (newValue === undefined) {
+        // 默认合并（lodash 的 baseMergeDeep 分支）
+        if (Array.isArray(srcValue)) {
+          newValue = Array.isArray(objValue) ? objValue : srcValue.slice()
+        } else if (isPlainObject(srcValue)) {
+          newValue = isPlainObject(objValue) ? objValue : {}
+          stack.set(srcValue, newValue)
+          mergeWith(newValue, [srcValue], customizer, stack)
+          stack.delete(srcValue)
+        } else {
+          newValue = srcValue
+        }
+      }
+
+      // assignMergeValue：值一样（SameValueZero）就不动
+      if (newValue !== undefined ? !eq(objValue, newValue) : !(key in target)) {
+        assignValue(target, key, newValue)
+      }
+    }
+  }
+  return target
+}
+
 class Config {
   constructor () {
     this.config = {}
@@ -137,12 +219,26 @@ class Config {
     // 这里原本还有一大段从 memz-plugin 抄来的逻辑：diff 出新旧配置的差异，
     // 挑出 `servers.*` 的增删开关算成 target。但本插件的配置里从来没有 servers 这个字段，
     // 那段 for 循环永远走不到 continue 之后，算出来的 target 也没有任何人使用 —— 纯死代码，已删。
-    const watcher = chokidar.watch(file)
-    watcher.on('change', () => {
-      delete this.config[key]
-      if (typeof Bot == 'undefined') return
-      logger.mark(`[GloryOfKings-Plugin][修改配置文件][${type}][${name}]`)
-    })
+    //
+    // ⚠️ 用内置 `fs.watch` 而不是 chokidar（见文件头）。失败**不能往外抛**：
+    //    调用方是 getYaml，它一旦抛就等于「一份读不到的配置让插件起不来」，
+    //    而这里只是个热重载优化 —— 监听不上顶多是改完配置要重启云崽。
+    let watcher
+    try {
+      watcher = fs.watch(file, () => {
+        delete this.config[key]
+        if (typeof Bot == 'undefined') return
+        logger.mark(`[GloryOfKings-Plugin][修改配置文件][${type}][${name}]`)
+      })
+      watcher.on('error', () => {
+        // 文件被删/被替换时监听会失效，清掉记录让下次 getYaml 重新挂
+        try { watcher.close() } catch { /* 已经关了就算了 */ }
+        delete this.watcher[key]
+      })
+    } catch (error) {
+      logger.error(`监听配置文件 ${file} 失败（改完配置需重启云崽才生效）：${error.message}`)
+      return
+    }
 
     this.watcher[key] = watcher
   }
@@ -198,20 +294,22 @@ class Config {
     let differences = false
 
     function customizer (objValue, srcValue, key, object, source, stack) {
-      if (_.isArray(objValue) && _.isArray(srcValue)) {
+      if (Array.isArray(objValue) && Array.isArray(srcValue)) {
         return objValue
-      } else if (_.isPlainObject(objValue) && _.isPlainObject(srcValue)) {
-        if (!_.isEqual(objValue, srcValue)) {
-          return _.mergeWith({}, objValue, srcValue, customizer)
+      } else if (isPlainObject(objValue) && isPlainObject(srcValue)) {
+        if (!isEqual(objValue, srcValue)) {
+          // 与 lodash 版一致：这里**开一份新的合并栈**（lodash 的 mergeWith
+          // 内部自己 new Stack），而不是把外层栈传进去
+          return mergeWith({}, [objValue, srcValue], customizer)
         }
-      } else if (!_.isEqual(objValue, srcValue)) {
+      } else if (!isEqual(objValue, srcValue)) {
         differences = true
         return objValue !== undefined ? objValue : srcValue
       }
       return objValue !== undefined ? objValue : srcValue
     }
 
-    let result = _.mergeWith({}, objA, objB, customizer)
+    let result = mergeWith({}, [objA, objB], customizer)
 
     return {
       differences,

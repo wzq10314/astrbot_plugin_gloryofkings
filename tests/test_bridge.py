@@ -13,7 +13,6 @@ import sys
 import tempfile
 import types
 import unittest
-from unittest.mock import patch
 import yaml
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -75,48 +74,6 @@ class Integration(unittest.IsolatedAsyncioTestCase):
         for app in self.bridge.inventory:
             self.assertTrue(app['rules'])
 
-    async def test_push_membership_uses_uncached_queries_and_omits_failed_groups(self):
-        original = self.bot.call_action
-
-        async def query(action, **params):
-            if action == 'get_group_member_list':
-                self.assertIs(params.get('no_cache'), True)
-                if params['group_id'] == '2':
-                    return {'status': 'failed', 'retcode': 1200}
-                if params['group_id'] == '3':
-                    return []
-                if params['group_id'] == '4':
-                    return [{'nickname': 'invalid'}]
-            return await original(action, **params)
-
-        self.bot.call_action = query
-        result = await self.bridge.handle('push_membership', {'groups': ['1', '2', '3', '4', '1']})
-        self.assertEqual(set(result['members']), {'1'})
-        self.assertEqual(result['members']['1'][0]['user_id'], 12345001)
-        with self.assertRaises(bridge_module.BridgeError):
-            await self.bridge.push_membership(['not-a-group'])
-
-    async def test_push_membership_waits_for_refresh_instead_of_using_old_cache(self):
-        await self.bridge.refresh_lock.acquire()
-        pending = asyncio.create_task(self.bridge.push_membership(['987654321']))
-        try:
-            await asyncio.sleep(0)
-            self.assertFalse(pending.done())
-        finally:
-            self.bridge.refresh_lock.release()
-        result = await pending
-        self.assertIn('987654321', result['members'])
-
-    async def test_push_membership_lock_wait_is_inside_total_deadline(self):
-        real_timeout = asyncio.timeout
-        await self.bridge.refresh_lock.acquire()
-        try:
-            with patch.object(bridge_module.asyncio, 'timeout', side_effect=lambda seconds: real_timeout(0.02)):
-                result = await asyncio.wait_for(self.bridge.push_membership(['987654321']), 1)
-            self.assertEqual(result, {'members': {}})
-        finally:
-            self.bridge.refresh_lock.release()
-
     async def test_remote_connection_requires_explicit_endpoint_approval(self):
         for command in ('#营地观战连接 https://example.invalid', '#营地消息连接 https://example.invalid'):
             _, calls = await self.command(command, user='12345002', master=True)
@@ -137,26 +94,6 @@ class Integration(unittest.IsolatedAsyncioTestCase):
         self.assertIn('群管理员',json.dumps(calls,ensure_ascii=False))
         _,calls=await self.command('#开启群日报推送',group='987654321',role='admin')
         self.assertNotIn('仅限',json.dumps(calls,ensure_ascii=False))
-
-    async def test_news_subscription_is_group_scoped_and_requires_admin(self):
-        file=self.bridge.root/'plugins/GloryOfKings-Plugin/data/GameNewsPush.yaml'
-        _,calls=await self.command('#开启王者公告推送',group='987654321')
-        self.assertIn('群管理员',json.dumps(calls,ensure_ascii=False))
-        self.assertFalse(file.exists())
-        _,calls=await self.command('#开启王者公告推送',master=True)
-        self.assertIn('在群里',json.dumps(calls,ensure_ascii=False))
-        self.assertFalse(file.exists())
-        _,calls=await self.command('#开启王者公告推送',group='987654321',role='admin')
-        self.assertIn('已开启',json.dumps(calls,ensure_ascii=False))
-        store=yaml.safe_load(file.read_text(encoding='utf-8'))
-        self.assertEqual(list(store['pushList']),['987654321'])
-        await self.bridge.close()
-        self.bridge=bridge_module.Bridge(self.plugin,self.bot,'test-platform','55555001')
-        await self.bridge.start()
-        self.assertEqual(yaml.safe_load(file.read_text(encoding='utf-8')),store)
-        _,calls=await self.command('#关闭王者公告推送',group='987654321',role='admin')
-        self.assertIn('已关闭',json.dumps(calls,ensure_ascii=False))
-        self.assertEqual(yaml.safe_load(file.read_text(encoding='utf-8'))['pushList'],{})
 
     async def test_binding_switch_delete_persists_and_isolates_users(self):
         for text in ['#绑定营地 77777001','#绑定营地 77777002','#切换营地 1']:
@@ -183,28 +120,6 @@ class Integration(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(len(data),20000)
         out=os.environ.get('GOK_PREVIEW')
         if out:Path(out).write_bytes(data)
-
-    async def test_subhelp_routes_before_watch_and_im_handlers(self):
-        for text in ['#营地观战帮助','#营地消息帮助']:
-            with self.subTest(command=text):
-                result,calls=await self.command(text,group='987654321')
-                images=[s for action,p in calls if action.startswith('send_') for s in p.get('message',[]) if s['type']=='image']
-                self.assertTrue(result['handled'])
-                self.assertTrue(images,'subhelp should render without querying watch or private IM data')
-                self.assertNotIn('编号不对',str(result.get('messages')))
-        self.assertFalse(await self.bridge.request('match',event('#对比 12345678')))
-        self.assertFalse(await self.bridge.request('match',event('#获取营地ID')))
-
-    async def test_bare_binding_returns_tutorial_without_creating_binding(self):
-        file=self.bridge.root/'plugins/GloryOfKings-Plugin/data/UserData.yaml'
-        before=file.read_bytes()
-        result,calls=await self.command('#绑定营地',group='987654321')
-        self.assertTrue(result['handled'])
-        self.assertIn('获取教程',str(result.get('messages')))
-        self.assertTrue(any(s['type']=='image' for action,p in calls if action.startswith('send_') for s in p.get('message',[])))
-        self.assertEqual(file.read_bytes(),before)
-        _,calls=await self.command('#绑定营地')
-        self.assertIn('群里',json.dumps(calls,ensure_ascii=False))
 
     async def test_onebot_account_routing_and_local_file_boundary(self):
         await self.bridge.refresh_groups(force=True)

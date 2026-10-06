@@ -1,3 +1,19 @@
+/**
+ * 插件入口：初始化数据文件 → 并发加载 `apps/` 下所有模块 → 挂黑名单闸门。
+ *
+ * ## 加载约定
+ *
+ * `apps/` 下的 `.js` 文件**不需要注册**，扫到就加载，取它的 default 导出
+ * （没有 default 就取第一个导出）当云崽的 plugin 实例。所以新增指令只要
+ * 往 `apps/` 丢一个文件，不用改这里。
+ *
+ * 同时会尝试加载 `local/`（主人专属指令，不进公开仓）。**没有这个目录是正常的**，
+ * 静默跳过。
+ *
+ * ⚠️ 单个模块加载失败**不能拖垮整个插件**：`apps/` 里有 60 多个模块，
+ * 任何一个语法错 / 依赖缺失都只记一条日志并继续，其余功能照常可用。
+ * 这也是为什么下面每个 import 都包在 try 里。
+ */
 import path from 'node:path'
 import { writeYamlFile } from './utils/yamlUtils.js'
 import { guardApps } from './utils/blackList.js'
@@ -6,6 +22,7 @@ import fs from 'node:fs/promises'
 import chalk from 'chalk'
 import { fileURLToPath, pathToFileURL } from 'url'
 
+/** 启动时要确保存在的数据文件 / 目录 */
 const paths = {
   userSettingsDir: path.join(PluginData, 'user_settings'),
   userDataFile: path.join(PluginData, 'UserData.yaml'),
@@ -14,7 +31,7 @@ const paths = {
   gameStatsPushSettingsFile: path.join(PluginData, 'gameStatsPushSettings.yaml')
 }
 
-async function checkAndCreatePaths() {
+async function checkAndCreatePaths () {
   for (const [key, filePath] of Object.entries(paths)) {
     // 已存在就什么都不做。早先是无论存在与否都打一句「文件已创建」，
     // 于是每次启动都刷 5 行假的「已创建」日志
@@ -27,6 +44,7 @@ async function checkAndCreatePaths() {
       if (key.includes('Dir')) {
         await fs.mkdir(filePath, { recursive: true })
       } else {
+        // 订阅表要有个 pushList 骨架，其余的空对象就够
         await writeYamlFile(filePath, key === 'gameRecordPushFile' ? { pushList: {} } : {})
       }
       logger.info(`[${PluginName}] 初始化数据文件：${key}`)
@@ -48,7 +66,13 @@ let failureCount = 0
 
 logger.info(chalk.cyan('王者荣耀插件载入中...'))
 
-async function scanDirectory(directory) {
+/**
+ * 递归收集目录下所有 `.js` 模块的 URL。
+ *
+ * @param {string} directory
+ * @returns {Promise<{name: string, filePath: string}[]>}
+ */
+async function scanDirectory (directory) {
   const entries = await fs.readdir(directory, { withFileTypes: true })
   const tasks = []
 
@@ -67,7 +91,7 @@ async function scanDirectory(directory) {
   return (await Promise.all(tasks)).flat()
 }
 
-async function loadModules() {
+async function loadModules () {
   try {
     const filePaths = await scanDirectory(appsDir)
 
@@ -96,6 +120,8 @@ async function loadModules() {
           return
         }
 
+        // 同名模块（local/ 里覆盖 apps/ 的同名文件）依次挂 _1、_2，
+        // 保证每个实例都被云崽注册上，不会后者顶掉前者
         let newName = name
         let counter = 1
 
@@ -110,6 +136,7 @@ async function loadModules() {
         logger.debug(chalk.green(`[${PluginName}] 成功载入模块：${newName}，耗时 ${loadTime} ms`))
         successCount++
       } catch (error) {
+        // 只记日志，绝不往外抛：一个坏模块不该让整个插件起不来
         logger.error(chalk.red(`[${PluginName}] 加载模块失败：${name}`))
         logger.error(error)
         failureCount++

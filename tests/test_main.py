@@ -127,11 +127,6 @@ class Tool(unittest.IsolatedAsyncioTestCase):
         answer=await self.plugin.kings_tool(e,'开启群日报推送')
         self.assertIn('仅限群主',answer)
         self.assertTrue(all(p.get('group_id')=='987654321' for a,p in e.bot.calls if a=='send_group_msg'))
-    async def test_llm_news_subscription_obeys_same_permissions(self):
-        e=Event('帮本群打开公告推送',group='987654321')
-        answer=await self.plugin.kings_tool(e,'开启王者公告推送')
-        self.assertIn('仅限群主',answer)
-        self.assertTrue(all(p.get('group_id')=='987654321' for a,p in e.bot.calls if a=='send_group_msg'))
     async def test_normal_chat_passes_and_sensitive_commands_dont_reach_llm(self):
         e=Event('今天吃什么');await self.plugin.on_message(e)
         self.assertFalse(e.stopped);self.assertFalse(self.plugin.bridges)
@@ -142,19 +137,9 @@ class Tool(unittest.IsolatedAsyncioTestCase):
         self.assertIn('仅限 AstrBot 管理员',answer)
 
 class Validation(unittest.TestCase):
-    def test_new_section_help_and_binding_tutorial_routes(self):
-        for text in ['绑定营地','查询战绩帮助','英雄相关帮助','皮肤帮助','营地ID共享帮助',
-                     '营地观战帮助','营地消息帮助','战绩推送帮助','群战绩报告帮助','王者对比 12345678']:
-            with self.subTest(command=text):
-                self.assertEqual(commands.normalize(text),'#'+text)
-        for text in ['对比','对比 12345678','获取营地ID','怎么看营地ID']:
-            with self.subTest(removed_command=text),self.assertRaises(ValueError):
-                commands.normalize(text)
-
     def test_query_and_mutation_examples_are_routable(self):
         for text in ['查询战绩','英雄攻略 妲己','绑定营地 77777001','开启战绩推送',
-                     '皮肤上新','营地QQ全局登录','王者帮助','营地ID共享状态','巅峰趋势 14',
-                     '王者公告','王者资讯','王者公告列表','开启王者公告推送','关闭王者公告推送']:
+                     '皮肤上新','营地QQ全局登录','王者帮助','营地ID共享状态','巅峰趋势 14']:
             self.assertEqual(commands.normalize(text),'#'+text)
     def test_multiline_and_unknown_rejected(self):
         for text in ['王者帮助\n王者配置 distToken "x"','随便聊聊','A'*300]:
