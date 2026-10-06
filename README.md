@@ -4,7 +4,7 @@
 
 GloryOfKings-Plugin 的 AstrBot 适配版
 
-![Version](https://img.shields.io/badge/version-1.0.14-blue)
+![Version](https://img.shields.io/badge/version-1.0.15-blue)
 ![AstrBot](https://img.shields.io/badge/AstrBot-4.28.1%2B-purple)
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
 ![OneBot](https://img.shields.io/badge/OneBot11-NapCat-green)
@@ -18,7 +18,7 @@ GloryOfKings-Plugin 的 AstrBot 适配版
 
 这是基于 [longhengmu/GloryOfKings-Plugin](https://gitee.com/longhengmu/GloryOfKings-Plugin) 的业务核心适配项目，通过常驻 Node 核心对接 AstrBot 的消息、权限、数据目录及后台任务，并提供 `glory_of_kings` LLM 工具和 Python 依赖管理命令。当前打包的命令见 `routes.json`，各平台的可用范围见下文。
 
-本版上游基准提交：[`92fc3a47f433`](https://gitee.com/longhengmu/GloryOfKings-Plugin/commit/92fc3a47f433188e547619545c0334ee1e921122)，来源清单见 `UPSTREAM.json`。v1.0.14 包含 QQ 官方平台适配、帮助按钮和可选的跨机器人查询登录态复用。
+本版上游基准提交：[`2cb07250a1ff`](https://gitee.com/longhengmu/GloryOfKings-Plugin/commit/2cb07250a1ff3ac0930b16c563b76f597995e4c1)（2026-10-06），241 份上游文件的来源与摘要见 `UPSTREAM.json`。v1.0.15 同步英雄攻略入口、查询与推送修复、ffmpeg 手动路径和运维提醒收件人配置；实际加载 43 个模块、109 条路由。QQ 官方平台适配、帮助按钮和可选的跨机器人查询登录态复用继续提供。
 
 > 观战直播、营地消息及共享库的客户端已接入。它们所需的服务端由上游作者单独分发，不包含在公开仓库中，需自行取得服务地址和接入令牌。本包没有伪造接口或附送私人密钥。营地游戏数据查询需要有效登录态，并受接口权限、隐私设置及频控影响；官网公告查询无需营地登录。
 
@@ -26,7 +26,7 @@ GloryOfKings-Plugin 的 AstrBot 适配版
 
 仓库地址：[https://github.com/wzq10314/astrbot_plugin_gloryofkings](https://github.com/wzq10314/astrbot_plugin_gloryofkings)。可在 AstrBot 插件管理中使用该 Git 仓库地址安装，或从 [Releases](https://github.com/wzq10314/astrbot_plugin_gloryofkings/releases) 下载 ZIP。
 
-1. 在 AstrBot 后台的插件管理中安装仓库，或上传 `astrbot_plugin_gloryofkings-v1.0.14.zip`，然后启用插件。
+1. 在 AstrBot 后台的插件管理中安装仓库，或上传 `astrbot_plugin_gloryofkings-v1.0.15.zip`，然后启用插件。
 2. 环境需要 **Python 3.12、Node.js 22+、npm**。Python 依赖随安装包安装，Node 依赖首次启动自动准备。已安装 RConsole 的机器可以复用系统 Node 和 Chromium；两个插件的数据、账号和依赖目录独立。
 3. 管理员私聊机器人发送 `#王者依赖状态`。浏览器就绪的判断包含一次真实启动和截图。未就绪时可发 `#王者浏览器安装`，依赖安装失败时可发 `#王者依赖安装`。
 4. 先发 `#王者帮助` 检查图片，再按下方步骤登录和绑定。
@@ -59,6 +59,8 @@ QQ 官方图文和交互按钮可配合 `astrbot_plugin_official_cards` 使用�
 帮助图片渲染失败时返回文字。主人/系统指令和观战、消息的运维条目仅在管理员私聊的帮助里展示；营地消息帮助不查询私人数据，实际好友和消息功能仍只能私聊使用。
 
 不知道营地 ID 在哪里时，在群里发送不带参数的 `#绑定营地`，机器人会给出教程图。原版已取消 `#获取营地ID` / `#怎么看营地ID` 等旧教程入口；比较账号使用 `#王者对比`，泛指令 `#对比` 不再触发插件。
+
+英雄攻略推荐发送 `#王者英雄攻略 妲己`，也支持 `#王者出装 亚瑟`、`#王者铭文 孙悟空`、`#王者克制 妲己`。不带“王者”的 `#英雄攻略`、`#攻略`、`#出装`、`#铭文`、`#铭文出装`、`#克制` 仍可加英雄名使用，按较低优先级处理。若其他插件也使用这些短命令，请使用带“王者”的入口。官网出装、英雄关系与技能无需营地登录；营地核心装备和铭文数据需要可用登录态，获取失败时保留官网内容。
 
 ## 观战服务：获取地址和令牌
 
@@ -153,6 +155,8 @@ QQ 官方图文和交互按钮可配合 `astrbot_plugin_official_cards` 使用�
 
 原版配置项已接入 AstrBot 插件设置，包括推送时间、缓存、服务地址、共享开关和认证请求默认参数。`config.yaml` 是默认值文件；主要配置入口是 AstrBot 后台。
 
+`ffmpegPath` 默认留空，观战部署时自动检测 ffmpeg；自动检测失败时可填写运行环境内的完整可执行文件路径。手动路径不可用会报错，不再回退自动查找。`masterNotify` 默认空列表，运维私聊提醒使用首位管理员；填写已有管理员的用户标识可指定收件人，不能通过此项授予权限。QQ 官方投递仍受会话可达性和平台额度限制。
+
 黑名单请使用本插件的 `blackList` 设置或原版黑名单命令。AstrBot 4.28.1 标准配置没有云崽全局黑名单的等价字段，`blackListFollowGlobal` 仅在宿主额外提供兼容字段时生效。
 
 锅巴专属页面用 AstrBot 配置与管理员私聊命令替代：
@@ -197,7 +201,7 @@ v1.0.9 的观战/IM 服务状态查询只读取现状；没有运行中的守护
 
 ## 验证范围
 
-v1.0.14 的发布核对以当前源码、配置结构和可运行的离线测试为准。以下记录属于其各自版本，不代表当前版本重新完成了真实 QQ 投递、扫码或外置服务端到端验证。
+v1.0.15 已完成 37 项 Python 回归，实际核心加载得到 43 个模块、109 条路由；本次范围与待验证项见 [验证记录](docs/VALIDATION-v1.0.15.md)。以下历史记录属于其各自版本，不代表当前版本重新完成了真实 QQ 投递、扫码或外置服务端到端验证。
 
 v1.0.10 的分块帮助、实际图片渲染、命令路由和服务接入错误分类验证见 [本版验证记录](docs/VALIDATION-v1.0.10.md)。以下旧版本记录保留各自执行日期和范围。
 

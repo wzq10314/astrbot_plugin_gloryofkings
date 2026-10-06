@@ -39,6 +39,18 @@
     "type": "string",
     "default": ""
   },
+  "ffmpegPath": {
+    "description": "观战服务使用的 ffmpeg 可执行文件完整路径，留空自动检测",
+    "type": "string",
+    "default": "",
+    "hint": "填写 AstrBot 容器或运行环境内的路径，如 /usr/bin/ffmpeg 或 D:\\tools\\ffmpeg\\bin\\ffmpeg.exe。填写后只检查此路径；路径不可用时不会回退到自动查找。"
+  },
+  "masterNotify": {
+    "description": "运维提醒收件人（从 AstrBot 管理员及附加管理员中选择）",
+    "type": "list",
+    "default": [],
+    "hint": "填写管理员用户标识列表；留空使用首位管理员。只影响登录态失效、保活、消息投递失败及共享库接入等运维私聊提醒，不授予管理员权限。"
+  },
   "bot_overrides": {
     "description": "多机器人独立配置，JSON：{\"机器人QQ\":{\"watchApiUrl\":\"http://127.0.0.1:8899\"}}",
     "type": "string",

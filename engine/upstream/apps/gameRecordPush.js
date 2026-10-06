@@ -70,15 +70,32 @@ import {
 } from '../utils/pushStore.js'
 import { fetchBattleDetail, renderBattleDetail } from '../utils/battleDetailImage.js'
 import { fetchRoleNames } from '../utils/roleName.js'
+// 锁 / 游标 / 退避 / 安静期 / 盯梢闸必须跨热重载共享，否则会被热重载架空（见 utils/hotState.js）
+import { hotBox } from '../utils/hotState.js'
 import { getAllBindings } from '../utils/rankStore.js'
 import { getCurrentId, getLocalImage, Button, shouldQuote, pickGroupSafe, resolveMemberName, isBlackUser, ApiService, isProfileHidden } from '#utils'
 import { Config } from '#components'
 
 /**
  * 轮询并发锁。订阅多时一轮要几十秒，cron 设得短就会出现上一轮没跑完下一轮又启动，
- * 同一场战绩被两轮同时读到、各推一次。模块级变量足够——一个进程里只有一个 task 实例。
+ * 同一场战绩被两轮同时读到、各推一次。
+ *
+ * ⚠️ 「模块级变量足够——一个进程里只有一个 task 实例」这句**在热重载下不成立**
+ *    （2026-10-06 修）：JiuLi 热重载会让本模块重新求值，`let running` 变成**新变量**，
+ *    而旧实例那一轮（几十秒）还在跑 → 新实例看到 `false` 就并发再跑一轮。
+ *    实测（`utils/hotState.js` 里有可复现实验）：热重载后新实例看到 `running:false, cursor:0`。
+ *    所以这里连同下面的游标 / 退避 / 安静期 / 盯梢闸 / 日志节流**一起锚进 hotBox**。
  */
-let running = false
+const S = hotBox('gameRecordPush.state', {
+  running: false,
+  cursor: 0,
+  recoverRounds: 0,
+  quietUntil: 0,
+  hintRunning: false,
+  lastFriendNullLogAt: 0,
+  lastWaitLogAt: 0,
+  lastTargetsLogAt: 0
+})
 
 /**
  * 一轮最多真发几次请求。
@@ -115,14 +132,14 @@ const RATE_LIMIT_QUIET_MS = 15 * 60 * 1000
 /**
  * 轮询游标：上一轮被预算挡下的位置。没有它的话每轮都从头遍历，
  * 排在后面的订阅永远轮不到（前面的每次都用光预算）。
+ *
+ * ⚠️ 跨热重载共享（`S`）：模块级 `let` 热重载后归零，会让刚被预算挡下的那批订阅
+ *    重新从下标 0 开始排 —— 又是「后面的永远轮不到」。
  */
-let cursor = 0
 
-/** 频控恢复期还剩几轮，> 0 时每轮只放一个请求探路 */
-let recoverRounds = 0
+/** 频控恢复期还剩几轮，> 0 时每轮只放一个请求探路（跨热重载共享，见 S） */
 
-/** 命中频控后的安静期截止时刻（ms），0 = 不在安静期 */
-let quietUntil = 0
+/** 命中频控后的安静期截止时刻（ms），0 = 不在安静期（跨热重载共享，见 S） */
 
 /**
  * 盯梢轮询的重入闸。
@@ -131,17 +148,18 @@ let quietUntil = 0
  *    一轮要打营地接口、可能慢到几秒；没有这道闸的话下一轮会叠上来，
  *    请求量翻倍往上叠，而营地频控命中要静默 12 小时。
  *    和 server/watch-server.js 的 `tickRunning` 是同一个套路。
+ *
+ * ⚠️ 更要跨热重载共享（`S`）：setInterval **不会**被热重载清掉（它属于旧的模块实例），
+ *    而闸门若跟着模块重新求值就变回 false —— 旧定时器 + 新实例，闸门形同不存在。
  */
-let hintRunning = false
 
 /** 「查不到好友关系」日志的上次打印时刻（ms）。服务真挂了时这个分支每 15 秒走一次，不节流会刷屏 */
-let lastFriendNullLogAt = 0
 
 /** 「盯梢等待」日志的上次打印时刻（ms）。同理，盯梢 15 秒一轮，不节流会刷屏 */
-let lastWaitLogAt = 0
 
 /** 「本轮挑到 N 个」日志的上次打印时刻（ms）。同上 */
-let lastTargetsLogAt = 0
+// 上面三个日志节流也跨热重载共享（`S`）—— 归零只是多打一行日志，无害，但顺手一起锚住，
+// 免得这个文件的「模块级可变状态」还剩一半在外面，下次审计又要重新判一遍。
 
 /**
  * 盯梢最长盯多久。上线后一直不进对局（在大厅挂着、开着客户端没打）的，
@@ -260,16 +278,27 @@ export class GameRecordPush extends plugin {
     }
 
     const latest = (data.list || [])[0] || {}
+    // ⚠️⚠️ **必须在这里重新读一遍表**（2026-10-06 修）。上面那次 fetchLatest 是真实 HTTP
+    //    请求，网络抖动 / 频控换号时能挂几秒；而第 246 行读到的 list 是那一刻的快照。
+    //    拿旧快照整表 savePushList 写回，会把这段时间里**别人**的改动全部抹掉：
+    //      · 别人刚发的 #开启战绩推送 → 记录被覆盖，他收到「已开启」但订阅实际不存在；
+    //      · 别人刚发的 #关闭战绩推送 → 记录被恢复，表现成「刚关了又自己开回来」。
+    //    pushStore.js 的 mergeSubState 就是为了避免这种整表覆盖才存在的。
+    const fresh = loadPushList()
+    const base = fresh[qq] || existed
+    const merged = withSubGroup(base, e.group_id)
     list[qq] = {
-      ...existed,
+      ...base,
       battle: true,
-      groups,
-      group,
+      groups: merged.groups,
+      group: merged.group,
       campId: String(campId),
       lastGameSeq: String(latest.gameSeq || ''),
       lastGameTime: String(latest.dtEventTime || ''),
       // 订阅时正在打的那局不提醒，否则一开启就收到一条「开打了」
       lastGamingStart: String(data.gaming?.dtEventTime || ''),
+      // 快照那份也一起种上：盯梢/出图读的是它（见 pushStore.observeSnapshot）
+      lastGamingStartSnap: String(data.gaming?.dtEventTime || ''),
       // 连胜里程碑也从零开始，别拿上次订阅期间攒下的键把第一个里程碑吞掉
       lastStreakKey: '',
       // 清掉可能残留的退避档位：这里是就地合并，上次关订阅前攒下的 skipTicks
@@ -393,13 +422,21 @@ export class GameRecordPush extends plugin {
     }
 
     const nowSec = Math.floor(Date.now() / 1000)
+    // ⚠️⚠️ 同 toggle：上面那次 fetchOnlineState 是真实 HTTP 请求，挂起期间别人可能改过订阅表，
+    //    拿第 373 行的旧快照整表写回会把他们的改动抹掉（2026-10-06 修）。
+    const fresh = loadPushList()
+    const base = fresh[qq] || existed
+    const merged = withSubGroup(base, e.group_id)
     list[qq] = {
-      ...existed,
+      ...base,
       online: true,
-      // 只开上下线提醒时也要有 group/campId，且不能顺手把战绩推送打开
-      battle: existed.battle === true,
-      groups,
-      group,
+      // 只开上下线提醒时也要有 group/campId，且不能顺手把战绩推送打开。
+      // ⚠️ 判据必须是「不是显式 false」而不是「=== true」：`battle` 是后加的字段，
+      //    老订阅里压根没有它，而全仓口径都是「缺字段算开着」（见 isFlagOn、checkBattle
+      //    的 `sub.battle !== false`）。写成 `=== true` 等于顺手把老订阅的战绩推送关掉。
+      battle: base.battle !== false,
+      groups: merged.groups,
+      group: merged.group,
       campId: String(campId),
       lastOnlineState: String(state.gameOnline),
       // 主页接口是玩家名的来源之一，缓存给不 @ 的那几条文案用
@@ -627,7 +664,7 @@ export class GameRecordPush extends plugin {
 
     if (!entries.length) return
 
-    if (running) {
+    if (S.running) {
       logger.warn(`[王者推送] 上一轮还在跑，本轮跳过（${entries.length} 个订阅，间隔可能设得太短）`)
       return
     }
@@ -640,18 +677,18 @@ export class GameRecordPush extends plugin {
       return
     }
 
-    if (Date.now() < quietUntil) {
-      logger.debug(`[王者推送] 频控安静期内（还剩 ${Math.ceil((quietUntil - Date.now()) / 1000)} 秒），本轮 ${entries.length} 个订阅都不查`)
+    if (Date.now() < S.quietUntil) {
+      logger.debug(`[王者推送] 频控安静期内（还剩 ${Math.ceil((S.quietUntil - Date.now()) / 1000)} 秒），本轮 ${entries.length} 个订阅都不查`)
       return
     }
 
-    running = true
+    S.running = true
     const roundStart = Date.now()
     const heroMap = await getHeroNameMap()
     // 恢复期每轮只放一个请求：冷却刚过时营地多半还在惩罚期内，发满预算等于立刻再吃一发
-    const budget = recoverRounds > 0 ? 1 : MAX_REQUESTS_PER_ROUND
+    const budget = S.recoverRounds > 0 ? 1 : MAX_REQUESTS_PER_ROUND
     const total = entries.length
-    const from = cursor % total
+    const from = S.cursor % total
     let sent = 0
     // 下一轮从哪个下标接着查，空串 = 本轮所有人都轮过了、下轮从头开始
     let next = ''
@@ -705,15 +742,15 @@ export class GameRecordPush extends plugin {
           logger.error(`[王者推送] 写退避计数失败: ${error.message}`)
         }
       }
-      running = false
-      cursor = next === '' ? 0 : next
+      S.running = false
+      S.cursor = next === '' ? 0 : next
       // 命中就闭嘴一段时间再探（探测期会自己延长到营地真放行为止）；没命中才把恢复期倒数掉
       if (ApiService.lastRateLimitAt() > roundStart) {
-        quietUntil = Date.now() + RATE_LIMIT_QUIET_MS
-        recoverRounds = RECOVER_PROBE_ROUNDS
+        S.quietUntil = Date.now() + RATE_LIMIT_QUIET_MS
+        S.recoverRounds = RECOVER_PROBE_ROUNDS
         logger.warn(`[王者推送] 命中营地频控：安静 ${Math.round(RATE_LIMIT_QUIET_MS / 60000)} 分钟，之后 ${RECOVER_PROBE_ROUNDS} 轮每轮只探一个订阅`)
-      } else if (recoverRounds > 0) {
-        recoverRounds -= 1
+      } else if (S.recoverRounds > 0) {
+        S.recoverRounds -= 1
       }
     }
   }
@@ -768,9 +805,33 @@ export class GameRecordPush extends plugin {
     // 这个号的玩家隐藏了主页：24 小时内主动取数一律跳过（见 utils/hiddenProfiles.js）。
     // 不发请求，state/data 保持 null，效果等同于「这轮什么都没拿到」，
     // 但省掉一个注定返回 -10107 的请求。
+    //
+    // ⚠️⚠️ **但一定要留下痕迹**（2026-10-05 修）：原来这里只有一句 `logger.debug` 就
+    //    `return` 了，后果是**整条订阅彻底静默**——
+    //      · `logger.debug` 默认不输出 → 日志里一个字都没有
+    //      · `return` 在 `mergeSubState` 之前 → `lastSeenAt` / `lastError` 全都不更新
+    //      · 订阅表里看起来**一切正常**（开关开着、没退避、群也在）
+    //    主人实测撞上：他的推送用的营地号被标了隐藏，于是 20 小时一条推送都没有，
+    //    而任何地方都查不出为什么 —— 只能靠「我自己发现推送没了」。
+    //    现在每轮都写 `lastSkipReason` + `lastSkipAt`，并且**按小时节流**打一条 mark 日志，
+    //    这样 `#隐藏主页名单` 和日志都能直接回答「这个号为什么没推」。
     if (isProfileHidden(campId)) {
-      logger.debug(`[王者推送] ${qq} 的营地 ${campId} 已标注隐藏主页，本轮跳过`)
+      const nowSkip = Date.now()
+      const lastAt = Number(sub?.lastSkipAt) || 0
+      // 落盘：让指令侧和订阅表都能看出「这一路是被跳过的，不是没跑」
+      mergeSubState(qq, {
+        lastSkipReason: `营地号 ${campId} 被标注隐藏主页`,
+        lastSkipAt: String(nowSkip)
+      })
+      // 日志按小时节流：每轮都打会把日志刷爆，但一声不吭就没法排查
+      if (nowSkip - lastAt > 60 * 60 * 1000) {
+        logger.mark(`[王者推送] ${qq} 的营地 ${campId} 被标注「隐藏主页」，本轮跳过（发 #隐藏主页名单 可看，发 #清除隐藏主页 ${campId} 可解除）`)
+      }
       return
+    }
+    // 这一轮真的查了 → 把「上次跳过」的痕迹清掉，下次跳过时才能重新打日志
+    if (sub?.lastSkipReason) {
+      mergeSubState(qq, { lastSkipReason: '', lastSkipAt: '0' })
     }
 
     // 老订阅没有 battle 字段，按开着算（向后兼容首个版本写下的订阅）
@@ -780,7 +841,19 @@ export class GameRecordPush extends plugin {
     // 采快照：先拉 profile，needBattleList 判为值得时再补一次战绩列表。
     // 这一步的口径与 #谁在打游戏 的现刷**同源**（都在 pushStore.collectSnapshot），
     // 这儿只管拿结果去决定播报什么。
-    const { state, data, patch } = await collectSnapshot(qq, campId, sub)
+    //
+    // ⚠️ `unavailable` = 营地**明确**说这个号取不到数据（隐藏主页 / 用户不存在）。
+    //    和「这轮请求失败」不是一回事：那种重试就好，这种重试一万次也一样，
+    //    得让主人能看出来（订阅项里写 lastUnavailableReason，出图/日志都能读）。
+    const { state, data, patch, unavailable } = await collectSnapshot(qq, campId, sub)
+
+    // 营地明确取不到 → 按小时节流说一声，别让主人对着「什么都没发生」干等
+    if (unavailable) {
+      const lastAt = Number(sub?.lastUnavailableAt) || 0
+      if (Date.now() - lastAt > 60 * 60 * 1000) {
+        logger.mark(`[王者推送] ${qq} 的营地 ${campId} 营地侧取不到数据（隐藏主页/用户不存在），这一路暂时推不了`)
+      }
+    }
 
     if (battleOn && data) {
       const handled = await this.checkBattle(qq, sub, campId, data, heroMap)
@@ -826,6 +899,8 @@ export class GameRecordPush extends plugin {
         lastGameSeq: String(latest.gameSeq || ''),
         lastGameTime: String(latest.dtEventTime || ''),
         lastGamingStart: String(data.gaming?.dtEventTime || ''),
+        // 快照那份同步重置，否则新号开局时会拿旧号的开始时刻算时长
+        lastGamingStartSnap: String(data.gaming?.dtEventTime || ''),
         // 在线状态也一起重置，新号的在线状态和旧号无关
         lastOnlineState: '',
         onlineSince: '',
@@ -1038,8 +1113,8 @@ export class GameRecordPush extends plugin {
    * 命中 -30107 会抛到这里，跳过本轮即可（api.js 已经做了账号级冷却）。
    */
   async hintTick () {
-    if (hintRunning) return
-    hintRunning = true
+    if (S.hintRunning) return
+    S.hintRunning = true
     try {
       if (readConfig().watchHintEnabled === false) return
 
@@ -1066,7 +1141,7 @@ export class GameRecordPush extends plugin {
         if (isBlackUser(qq) || !isFlagOn(sub, 'online')) continue
         // 一个群都没有的（退群了）：`send` 会直接返回 false，留着就是每轮白查一次
         if (!subGroups(sub).length) continue
-        const gamingStart = String(sub.lastGamingStart || '')
+        const gamingStart = String(sub.lastGamingStartSnap || sub.lastGamingStart || '')
         const inGame = String(sub.lastGaming || '') === '1'
         const watching = sub.hintWatching === '1'
         // 既没在盯、又没在打 → 没事
@@ -1097,8 +1172,8 @@ export class GameRecordPush extends plugin {
       // ⭐ 这一轮挑到了谁 —— 盯梢「到底有没有在挑人」的唯一直接证据。
       // 挑人判据只看本地快照（lastGaming / hintGamingStart），一条日志就能分清
       // 「没挑到人（快照没更新）」和「挑到了但发不出去（后面几环卡住）」。
-      if (targets.length && now - lastTargetsLogAt > 5 * 60 * 1000) {
-        lastTargetsLogAt = now
+      if (targets.length && now - S.lastTargetsLogAt > 5 * 60 * 1000) {
+        S.lastTargetsLogAt = now
         logger.mark(`[王者推送] 盯梢本轮挑到 ${targets.length} 个：${targets.map(([q]) => q).join('、')}`)
       }
 
@@ -1117,15 +1192,15 @@ export class GameRecordPush extends plugin {
         // 但这条路径原先一声不吭，盯满 15 分钟超时后用户只看到「没提示」、日志里也查不到原因
         // （2026-09-20 主人反馈周五一整天没提示，就是靠这条查出来的）。按 3 分钟节流打一条。
         if (action === 'wait') {
-          if (now - lastWaitLogAt > 3 * 60 * 1000) {
-            lastWaitLogAt = now
+          if (now - S.lastWaitLogAt > 3 * 60 * 1000) {
+            S.lastWaitLogAt = now
             logger.mark(`[王者推送] ${qq} 盯梢等待：${reason}（isGaming=${data ? Boolean(data.isGaming) : '接口没返回'} gaming=${data?.gaming ? '有' : '无'}）`)
           }
           continue
         }
 
         // 这一局的去重键：优先用**实时值**（比快照准）；隐私号拿不到 gaming，退回快照值
-        const gameKey = String(data?.gaming?.dtEventTime || sub.lastGamingStart || '')
+        const gameKey = String(data?.gaming?.dtEventTime || sub.lastGamingStartSnap || sub.lastGamingStart || '')
 
         if (action === 'drop') {
           logger.mark(`[王者推送] ${qq} 盯梢放弃：${reason}`)
@@ -1156,8 +1231,8 @@ export class GameRecordPush extends plugin {
         // ⚠️ 顺手把坐标带出来给 sendHint（同上，少了 owners 那边会裸查整个账号池）
         const friend = await this.findFriend(sub.campId)
         if (friend === null) {
-          if (now - lastFriendNullLogAt > 5 * 60 * 1000) {
-            lastFriendNullLogAt = now
+          if (now - S.lastFriendNullLogAt > 5 * 60 * 1000) {
+            S.lastFriendNullLogAt = now
             logger.mark(`[王者推送] 查不到 ${qq} 的好友关系（观战服务没起？），仍照发提示`)
           }
         } else if (friend === false) {
@@ -1177,7 +1252,7 @@ export class GameRecordPush extends plugin {
       // 定时器里绝不能把异常抛出去
       logger.error(`[王者推送] 盯梢轮询出错：${error.message}`)
     } finally {
-      hintRunning = false
+      S.hintRunning = false
     }
   }
 
@@ -1237,7 +1312,21 @@ export class GameRecordPush extends plugin {
    *      不是正常路径。
    */
   async sendHint (qq, sub, gaming, minutes, coord = null) {
-    const name = sub.roleName || await this.resolveDisplayName(qq, sub)
+    // ⚠️⚠️ **名字优先用营地实时返回的角色名**（2026-10-05 修）。
+    //    原先写的是 `sub.roleName || 群名片`，而 `#营地开播` 回话时用的是
+    //    `/api/friends` 里那一行的 `nick`（= 营地实时 roleName）—— **两个不同源**：
+    //      · `sub.roleName` 是订阅那一刻抓的，抓不到时还会**退回 QQ 群名片**
+    //        （实测订阅表里就有拿不到 roleName 的，提示里显示的其实是群昵称）
+    //      · 开播回话用的是王者角色名
+    //    于是同一个人出现两个名字，看着像「提示开播这个人、却开了另外一个人」。
+    //    `coord.nick` 就是 `/api/friends` 那一行的名字，跟开播那边**同源**，用它就一致了。
+    const campName = String(coord?.nick || coord?.campNick || '').trim()
+    const name = campName || sub.roleName || await this.resolveDisplayName(qq, sub)
+    // 顺手把抓到的角色名补进订阅表：订阅时没抓到 roleName 的，这里补上之后
+    // 后面的提示、以及别处用 `sub.roleName` 的地方就都准了
+    if (campName && campName !== String(sub?.roleName || '')) {
+      mergeSubState(qq, { roleName: campName })
+    }
     const text = `${name} 已经开局 ${minutes} 分钟了\n要不要开一路观战？发 #营地开播`
     const ok = await this.send(qq, sub, text)
     if (!ok) return false
@@ -1432,7 +1521,9 @@ function readConfig () {
  *    服务没起时**抛异常**，由调用方兜住 —— 盯梢只是锦上添花，不该因此报错刷屏。
  */
 async function callWatchApi (path, { method = 'GET', body = null, timeout = 15000 } = {}) {
-  const base = String(readConfig().watchApiUrl || 'http://127.0.0.1:8899').replace(/\/+$/, '')
+  // ⚠️ 控制面地址：好友名单 / 开播提示这些接口只在本机回环 8898 上监听，
+  //    公网的 8899 播放面不再受理（2026-10-05 起）
+  const base = String(readConfig().watchApiUrl || 'http://127.0.0.1:8898').replace(/\/+$/, '')
   const ctl = new AbortController()
   const timer = setTimeout(() => ctl.abort(), timeout)
   try {

@@ -5,8 +5,86 @@ import authStore from './utils/authStore.js'
 // ⚠️ 用具名导入，**不要用 `import * as`** —— 锅巴重新扫描时用带 query 的动态 import 加载本文件，
 //    那个上下文里命名空间导入会报 `does not provide an export named 'default'`，整个 support 载入失败
 //    （2026-09-20 实测：锅巴「插件配置」页里那一堆开关全没了）。用具名导入没有这个问题。
-import { getAccountSwitches, setAccountEnabled, invalidate } from './utils/campImStore.js'
+import { getAccountSwitches, setAccountEnabled, invalidate, pruneAccounts } from './utils/campImStore.js'
 import { ownerOf } from './utils/campImPush.js'
+import { listMasterQQ } from './utils/masterMsg.js'
+// 锅巴面板打开时，把「接入那一刻写进配置、但面板还显示为空」的那几格补齐
+import { fillDefaultShareUrl, migrateLegacyShareToken } from './utils/shareDefaults.js'
+
+/**
+ * 出给锅巴面板前要脱敏的账号字段。InputPassword 组件只遮前端输入框的显示，
+ * 「查看已保存的配置」走 HTTP 拿到的仍是原文 —— 不挡的话面板上一个能看到
+ * 插件配置页的人就能把整套营地登录态（token / userKey 能直接发请求）抄走
+ * （2026-10-05 修）。
+ */
+const SECRET_FIELDS = ['token', 'userKey', 'userSig', 'encodeRes', 'accessToken', 'refreshToken']
+
+/**
+ * ⚠️⚠️ 掩码格式必须和 utils/authStore.js 里的 maskSecret **完全一致**（头 6 位 + `...` + 尾 4 位）——
+ * 保存侧靠「提交回来的值 === mask（库里的原文）」认出「主人没碰过这一格」，格式一旦分叉，
+ * 一次锅巴保存把所有凭证覆写成掩码串，整个账号池当场报废。那边是模块私有函数引不进来
+ * （本文件被锅巴用带 query 的动态 import 加载，跨模块依赖已踩过坑，见上面的 import 注释），
+ * 这里照抄一份 —— 谁改那边，必须同步改这里。
+ */
+function maskSecret (value, keepStart = 6, keepEnd = 4) {
+  const text = value === null || typeof value === 'undefined' ? '' : String(value)
+  if (!text) return ''
+  if (text.length <= keepStart + keepEnd) return text
+  return `${text.slice(0, keepStart)}...${text.slice(-keepEnd)}`
+}
+
+/** 快照出面板前把凭证字段打码，其余字段原样透传 */
+function maskAccountsForGuoba (accounts) {
+  return accounts.map(account => {
+    const masked = { ...account }
+    for (const field of SECRET_FIELDS) {
+      masked[field] = maskSecret(account[field])
+    }
+    return masked
+  })
+}
+
+/**
+ * 面板存回来时的反向操作：把「没改过的掩码值」换回库里的原文。
+ *
+ * 判定第一看「提交值 === mask(当前库里值）」这一条等值比较 ——
+ * 主人真去手改了一格的话，提交值必然不等于 mask（原文），会按新值正常写入；
+ * 库里本来就是短值（mask 会原样返回）的字段，换回原文也等价不动。
+ * 库里查不到这个 userId 的条目（面板新加的号）原样放行 —— 新号本来就是手填的明文。
+ *
+ * 等值比较失配但提交值里带 `...` 的：不当新值写回（那是面板打开期间凭证被后台换过、
+ * 表单里残留的旧掩码串），保留库值并告警，见函数内注释（2026-10-05 修）。
+ */
+function restoreMaskedAccounts (accounts) {
+  const stored = new Map(
+    authStore.getGuobaAccounts().map(account => [String(account.userId), account])
+  )
+  return accounts.map(item => {
+    const original = stored.get(String(item?.userId || ''))
+    if (!original) return item
+    const restored = { ...item }
+    for (const field of SECRET_FIELDS) {
+      // ⚠️ `item[field]` 也会随表单缺字段变 undefined，等值比较天然挡掉（undefined !== 任何串）
+      if (item[field] && item[field] === maskSecret(original[field])) {
+        restored[field] = original[field]
+        continue
+      }
+      // ⚠️ 提交值里带 `...` 却又对不上库值的掩码：这是「面板打开期间凭证被后台换过」
+      //    （campRenew 换 token、扫码换 userSig）—— 表单里还是打开那一刻的旧掩码串，
+      //    等值比较自然失配。把它当真值写回会把凭证整个覆写成一串掩码、账号当场报废。
+      //    这种保留库里的现值并告警；只有不带省略号的真正手填新值才会走到下面放行。
+      //    ⚠️ 还要求**库里有值**（maskSecret 非空）：库里是空串时 maskSecret 也是空串，
+      //       这个条件会退化成「只要提交值带省略号就保留库值」，把用户手填的新值静默丢掉，
+      //       而打出的告警文案（「面板打开期间凭证被换过」）还是错的（2026-10-06 修）。
+      if (typeof item[field] === 'string' && item[field].includes('...') &&
+          maskSecret(original[field]) !== '' && item[field] !== original[field]) {
+        restored[field] = original[field]
+        logger.warn(`[王者锅巴] 账号 ${item.userId} 的 ${field} 提交值是过期掩码串（面板打开期间凭证可能已被后台更换），已保留库中现值`)
+      }
+    }
+    return restored
+  })
+}
 
 function getAuthPoolSnapshot () {
   const accounts = authStore.getGuobaAccounts().map(account => ({
@@ -33,8 +111,24 @@ function getAuthPoolSnapshot () {
  *    这里放一份是为了让主人不用切页面，在「插件配置」里就能顺手开关。
  */
 function getCampImSnapshot () {
+  // ⚠️⚠️ 「账号池里的号」和「能收营地消息的号」是**两个集合**，必须分开（2026-10-06 修）：
+  //    · pool —— 池子里**所有**有 userId 的号。这是 pruneAccounts 的 keep 集合，
+  //      语义是「在不在池子里」。
+  //    · all  —— 池子里**能收营地消息**的号（有 userSig，微信区那条路）。这是
+  //      「＋新增」下拉的候选集合。
+  //    原先两处共用 `filter(a => a?.userId && a?.userSig)`，等于拿「有 userSig 的号」
+  //    去喂删除语义的 pruneAccounts —— 营地消息是微信区走 userSig，QQ 区的号可能只有
+  //    token/userKey，这类号只要进过名单，主人打开一次锅巴「插件配置」页就会被
+  //    **从 campIm.yaml 里真删掉**，而保存侧同样过滤了 userSig、在面板上也加不回来。
+  //    实测线上 5 个号都有 userSig，所以目前不触发；但这是「传错集合」而非有意取舍。
+  const pool = authStore.listAccounts().filter(a => a?.userId)
+  const all = pool.filter(a => a?.userSig)
+  // ⚠️⚠️ **先跟账号池对账，再读名单**（2026-10-05 修）。原先直接
+  //    `Object.keys(switches).map(...)` 遍历白名单，池子里查不到就退回空对象、
+  //    条目照样列出来 —— 「账号管理页 1 个号、收消息名单 4 个」就是这么来的。
+  //    详见 utils/campImStore.js 的 pruneAccounts。
+  pruneAccounts(pool.map(a => a.userId))
   const switches = getAccountSwitches()
-  const all = authStore.listAccounts().filter(a => a?.userId && a?.userSig)
   const infoOf = new Map(all.map(a => [String(a.userId), a]))
 
   // ⚠️⚠️ **只列「收消息名单」里的号**（`campIm.yaml` 的 accounts）——
@@ -42,19 +136,30 @@ function getCampImSnapshot () {
   //    不代表它要挂 ws 收消息。早先这里把池子里的号全列出来、默认开，
   //    账号一多就没法管（2026-09-20 主人指出）。
   //    想加号：去侧边栏「营地消息」页面，那儿有「可以加进来的号」。
-  const accounts = Object.keys(switches).map(uid => {
-    const a = infoOf.get(String(uid)) || {}
-    return {
-      userId: String(uid),
-      nickname: a.nickname || a.userName || '',
-      enable: true
-    }
-  })
+  // ⚠️ 再 filter 一道兜底（同 guoba/index.js 的理由）：宁可少列，
+  //    也不能把池子里没有的号显示成「在收消息」
+  const accounts = Object.keys(switches)
+    .filter(uid => infoOf.has(String(uid)))
+    .map(uid => {
+      const a = infoOf.get(String(uid)) || {}
+      return {
+        userId: String(uid),
+        nickname: a.nickname || a.userName || '',
+        // ⚠️ 照实反映名单里的值，不要硬编码 true（2026-10-06 修）：
+        //    `false` 也是「不在名单」的合法写法（老数据 / 手工编辑过 campIm.yaml），
+        //    硬编码 true 会让面板把它显示成「收消息」，而用户随便点一次保存
+        //    就会经 setConfigData 把它真的刷回收消息、挂上 ws 推私信。
+        enable: switches[uid] === true
+      }
+    })
 
   // ⭐ 「＋新增」下拉里能挑的号：登录过、但还没进收消息名单的。
   //    ⚠️ 不给人手填 —— 谁记得住营地号那一串数字（2026-09-20 主人吐槽）。
   const available = all
-    .filter(a => !switches[String(a.userId)])
+    // ⚠️ 判据必须与 isAccountEnabled / setAccountEnabled 一致（严格等于 true）：
+    //    用 `!switches[uid]` 的话，残留的 `false` 会让**同一个号既出现在名单里、
+    //    又出现在「＋新增」下拉里**（2026-10-06 修）。
+    .filter(a => switches[String(a.userId)] !== true)
     .map(a => {
       const uid = String(a.userId)
       const nick = a.nickname || a.userName || '未命名'
@@ -77,6 +182,9 @@ export function supportGuoba () {
     usableCount
   } = getAuthPoolSnapshot()
   const campIm = getCampImSnapshot()
+
+  // 主人通知收件人的下拉候选：就是主人列表（锅巴里勾谁，运维提醒就只发给谁）
+  const masterOptions = listMasterQQ().map(qq => ({ label: qq, value: qq }))
 
   return {
     pluginInfo: {
@@ -107,6 +215,16 @@ export function supportGuoba () {
           label: '引用触发消息',
           bottomHelpMessage: '默认开启。开启时回复会引用触发指令那条消息；关闭后直接发送，不带引用。',
           component: 'Switch'
+        },
+        {
+          field: 'config.masterNotify',
+          label: '主人通知收件人',
+          bottomHelpMessage: '插件私聊主人的运维提醒（全局账号登录态失效、账号被营地限流、营地消息推不出去、保活结果、共享库接入提醒）默认只发给第一个主人，不会群发所有主人。想换人或几个人一起收，在这里勾（可多选）。留空 = 只发第一个主人。勾了的人被移出主人列表时会自动回落到第一个主人，不会把提醒静默丢掉。',
+          component: 'GTags',
+          componentProps: {
+            options: masterOptions,
+            placeholder: '留空 = 只发给第一个主人'
+          }
         },
         {
           field: 'config.battleResultCron',
@@ -232,6 +350,21 @@ export function supportGuoba () {
           }
         },
         {
+          field: 'config.ffmpegPath',
+          label: 'ffmpeg 路径',
+          bottomHelpMessage:
+            '留空 = 自动找（先查系统 PATH，再扫常见安装目录）。' +
+            '⚠️ 自动找认不出所有装法，提示「没找到 ffmpeg」时就手填这里。' +
+            '先确认它真的能跑：终端里执行 ffmpeg -version，有版本号就说明装了；' +
+            '再执行 where ffmpeg（Windows）或 which ffmpeg（Linux/macOS），把输出的那行完整路径填进来。' +
+            'Windows 形如 D:\\ffmpeg\\bin\\ffmpeg.exe，Linux/macOS 形如 /usr/local/bin/ffmpeg。' +
+            '填了就只认这个路径，自动查找整个跳过。改完发一次 #营地观战部署 生效。',
+          component: 'Input',
+          componentProps: {
+            placeholder: '留空 = 自动查找'
+          }
+        },
+        {
           field: 'config.shareEnabled',
           label: '营地ID共享库',
           bottomHelpMessage:
@@ -248,7 +381,8 @@ export function supportGuoba () {
           label: '共享库地址',
           bottomHelpMessage:
             '共享库服务端的地址，要带 http:// 或 https://。留空 = 不接入。' +
-            '等价指令：#营地共享库地址 <地址>。',
+            '等价指令：#营地共享库地址 <地址>。' +
+            '⚠️ 这格留空但上面「分发服务地址」填好了的话，打开本页会自动补上默认地址。',
           component: 'Input',
           componentProps: {
             placeholder: 'https://your-share.example.com'
@@ -291,10 +425,10 @@ export function supportGuoba () {
         {
           field: 'config.watchApiUrl',
           label: '观战服务地址',
-          bottomHelpMessage: '观战要另跑一个后端进程（负责取直播流、录像），插件通过这个地址指挥它。自己部署：先接入分发服务（见上面「服务端接入」），再发 #营地观战部署；用别人部署好的：直接发 #营地观战连接 <地址>，本机什么都不用装。换地址改这里也行，不用重启云崽。',
+          bottomHelpMessage: '观战要另跑一个后端进程（负责取直播流、录像），插件通过这个地址指挥它。填的是**控制面**端口（默认 8898，只绑本机回环）；公网的 8899 播放面不受理开播/停止/名单。自己部署：先接入分发服务（见上面「服务端接入」），再发 #营地观战部署；用别人部署好的：发 #营地观战连接 <对方的控制面地址>（控制面只绑对方本机回环，需要对方专门开出来，否则自己装一套）。换地址改这里也行，不用重启云崽。',
           component: 'Input',
           componentProps: {
-            placeholder: '默认 http://127.0.0.1:8899'
+            placeholder: '默认 http://127.0.0.1:8898'
           }
         },
         {
@@ -578,7 +712,7 @@ export function supportGuoba () {
           field: 'authPool.accounts',
           label: `营地账号列表（共 ${authPoolAccounts.length} 个，可用 ${usableCount} 个，失效 ${invalidCount} 个）`,
           helpMessage: '管理 AuthPool.json 中的完整账号信息。字段名已尽量按实际代码名标注；手动录入时，至少需要 userId、token、userKey 这三个核心字段。',
-          bottomHelpMessage: '删除条目会从账号池移除该账号；敏感字段支持直接编辑；全局账号和优先级都直接在这里维护（“全局账号”可以勾选多个，请求会在它们之间轮询）。',
+          bottomHelpMessage: '删除条目会从账号池移除该账号；敏感字段（Token/UserKey/UserSig 等）展示时已打码，没改过的掩码值保存时会自动还原成原值，要换就直接粘贴新值覆盖；全局账号和优先级都直接在这里维护（“全局账号”可以勾选多个，请求会在它们之间轮询）。',
           component: 'GSubForm',
           componentProps: {
             multiple: true,
@@ -894,13 +1028,29 @@ export function supportGuoba () {
         }
       ],
       getConfigData () {
+        // ⭐ 打开面板时先把手填的那几格补齐（2026-10-06 修）。
+        //
+        // ⚠️⚠️ 为什么非得在**读**的时候自愈：`#营地观战接入 <地址> <令牌>` /
+        //    `#营地消息接入 …` 落盘的是 `distUrl` / `distToken`，而这一页上
+        //    「共享库地址」（`shareApiUrl`）和「接入令牌」（`distToken`）是**另外两格** ——
+        //    用户接完观战回面板一看，令牌那格空的、共享库地址也是空的，只能再找主人
+        //    问一遍地址。令牌本来就三套共用（主人代共享库签的），地址也有模板默认值，
+        //    这两格不该留白。
+        //    放在读侧而不是只放在接入侧，是因为**升级上来的老用户不会重发接入指令**：
+        //    他们的 `shareToken` 里躺着值，而面板认的是 `distToken`，只能靠这里补。
+        //    两个函数都只在目标键**为空**时才写，用户填过的值一律不动。
+        fillDefaultShareUrl()
+        migrateLegacyShareToken()
+
         const { accounts } = getAuthPoolSnapshot()
         const campIm = getCampImSnapshot()
 
         return {
           config: Config.getDefOrConfig('config'),
           auth: Config.getDefOrConfig('auth'),
-          authPool: { accounts },
+          // ⚠️ 凭证字段出面板必须打码（见 SECRET_FIELDS），保存侧会用
+          //    restoreMaskedAccounts 把没改过的掩码值换回原文
+          authPool: { accounts: maskAccountsForGuoba(accounts) },
           campIm: { accounts: campIm.accounts }
         }
       },
@@ -911,18 +1061,40 @@ export function supportGuoba () {
         }
 
         if (Object.prototype.hasOwnProperty.call(data, 'authPool.accounts')) {
-          const { accounts: currentAccounts } = getAuthPoolSnapshot()
-          authStore.replaceAccountsFromGuoba(data['authPool.accounts'] || currentAccounts)
+          const payload = data['authPool.accounts']
+          // ⚠️ 快照现在带掩码：payload 缺了/不是数组就**别动池子**。
+          //    原来的 `|| currentAccounts` 兜底在带掩码的世界里等于「把掩码串当真值写回」，
+          //    一次保存报废整个池子。真正的删号是传空数组 []（Array.isArray 过得了）。
+          if (Array.isArray(payload)) {
+            authStore.replaceAccountsFromGuoba(restoreMaskedAccounts(payload))
+          }
         }
 
         // 营地消息的账号开关：写进 data/campIm.yaml（和侧边栏那个页面同一份）
         if (Object.prototype.hasOwnProperty.call(data, 'campIm.accounts')) {
-          for (const item of (data['campIm.accounts'] || [])) {
-            const userId = String(item?.userId || '').trim()
-            if (!userId) continue
-            setAccountEnabled(userId, item.enable === true)
+          const payload = data['campIm.accounts']
+          // ⚠️⚠️ 前端是**全量提交**当前名单的，删掉一行 = 那一项压根不出现在 payload 里。
+          //    只逐个 set 的话，被删掉的那一行从来没被遍历到，于是永远留在名单里 ——
+          //    而 apps/campIm.js 照样给它挂长连接、照样往归属人推私信（2026-10-06 修）。
+          //    正确做法见同仓库 guoba/index.js 的 /gok-camp-im/accounts：先做差集移出，再加入。
+          // ⚠️ 同时补 Array.isArray 守卫（照上面 authPool 那半边的写法）：payload 不是数组就
+          //    **别动名单** —— `|| []` 兜不住普通对象，`for...of` 抛 TypeError 会把后面
+          //    config / auth 的写回整批带崩，用户看到的是「点了保存但什么都没变」。
+          if (Array.isArray(payload)) {
+            const wanted = new Set(
+              payload
+                .filter(item => item?.enable === true)
+                .map(item => String(item?.userId || '').trim())
+                .filter(Boolean)
+            )
+            // 先移出：名单里有、但这次没提交的
+            for (const uid of Object.keys(getAccountSwitches())) {
+              if (!wanted.has(uid)) setAccountEnabled(uid, false)
+            }
+            // 再加入
+            for (const uid of wanted) setAccountEnabled(uid, true)
+            invalidate()
           }
-          invalidate()
         }
 
         for (const key in data) {

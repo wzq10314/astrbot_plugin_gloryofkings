@@ -58,6 +58,13 @@ const EMPTY_USER_DATA = {}
 /** 没写 priority 的账号默认排在这一档（数字越小越先试） */
 const DEFAULT_PRIORITY = 100
 
+/**
+ * 健康账号的 `lastSuccessAt` 最少隔多久才落盘一次。
+ * 它只剩锅巴面板展示这一个消费方（见 markAuthSuccess 的注释），
+ * 10 分钟的颗粒度足够「看看这个号最近活没活」。
+ */
+const LAST_SUCCESS_FLUSH_MS = 10 * 60 * 1000
+
 // ────────────────────────────────────────────────────────────────────────
 // 基础转换
 // ────────────────────────────────────────────────────────────────────────
@@ -335,10 +342,29 @@ class AuthStore {
         continue
       }
 
+      // ⚠️⚠️ 必须把**原账号**当 `existing` 传进去（2026-10-06 修）。
+      //    原先漏了这第三个参数，`#normalizeAccount(account, existing = {})` 于是拿到空对象，
+      //    `FIELD_RESOLVERS.created` 里的 `existing[key]` 恒为 undefined →
+      //    每次都走 `|| timestamp` 分支 → **`createdAt` 每次落盘都被刷成当前时间**。
+      //    `#patchAccount`（另一条路径）是传了 `previous` 的，所以两条路径行为不一致，
+      //    这个不一致正是它能长期藏住的原因。
+      //
+      //    实测：两个账号 createdAt 分别是 2026-01-01 / 2026-02-02，
+      //    过一次 `#savePool` 后**都变成 2026-03-03**；
+      //    对照组走 `#patchAccount` 的旧值原样保留。
+      //    线上 `data/AuthPool.json` 5 个账号的 `createdAt` **完全相同**、
+      //    `updatedAt` 也完全相同，而 `lastLoginAt` 各不相同 —— 只有这两个被抹平了。
+      //
+      //    影响：代码里明确写着「出事后只能靠翻 createdAt 反推」，这个字段的用途
+      //    就是事后追查；它恒等于「最后一次落盘时间」等于追查能力没了。
+      //    ⚠️ 循环里先读后写：`pool.accounts[normalizedUserId]` 此时还是旧值
+      //    （我们写的是新建的 `accounts`，不碰 `sourceAccounts`）。
+      const existing = sourceAccounts[normalizedUserId] || {}
+
       accounts[normalizedUserId] = this.#normalizeAccount({
         ...account,
         userId: normalizedUserId
-      })
+      }, existing)
     }
 
     return { accounts }
@@ -366,8 +392,10 @@ class AuthStore {
   /**
    * 「找到账号 → 打补丁 → 落盘」的公共骨架。
    *
-   * `markAuthFailure` / `markAuthSuccess` 的流程一模一样（空 userId 给 null、
-   * 账号不存在给 null、归一化、写回、存盘），差别只在补丁内容，所以骨架收在这里。
+   * `markAuthFailure` / `markAuthSuccess` / `unmarkAuthFailure` 的补丁+落盘部分
+   * 一模一样（空 userId 给 null、账号不存在给 null、归一化、写回、存盘），
+   * 差别只在补丁内容与各自的前置判据（markAuthSuccess 有「无事早退」节流，
+   * 见它自己的注释），所以骨架收在这里。
    *
    * 补丁用**回调**而不是现成对象：`authErrorCount` 要拿池里的旧值 +1，
    * 调用方必须先看到旧值才能算出来。
@@ -492,9 +520,48 @@ class AuthStore {
     }
   }
 
-  /** 登录成功：清掉失效标记和错误计数，记下成功时间 */
+  /**
+   * 登录成功：清掉失效标记和错误计数，记下成功时间。
+   *
+   * ⚠️ **无事早退**：账号本来就健康（没标 authInvalid、没有错误计数、没有
+   *    lastAuthErrorAt/Message）时，一次成功请求没有任何**状态**要纠正，
+   *    只读不写。这条路径原先是每个成功请求都全量重写 AuthPool.json
+   *    （一天数千次磁盘放大，还把全池 updatedAt 刷成一样，审计意义归零）。
+   *    读盘这一步省不掉：AuthPool 是唯一事实源，锅巴/手工随时会改它，
+   *    不能加内存缓存假装没这回事——省掉的是写，不是读。
+   *
+   * ⚠️ `lastSuccessAt` 剩余的唯一语义是「大概最后一次成功」（锅巴面板展示用，
+   *    grep 过全仓库没有任何逻辑消费它的新鲜度，campRenew 的注释也明确告诫
+   *    别拿它当覆盖率指标），所以**节流写盘**：距上次落盘不足
+   *    `LAST_SUCCESS_FLUSH_MS` 就只在内存里攒着，到点随下一次成功一起写。
+   */
   markAuthSuccess (userId) {
-    const patched = this.#patchAccount(userId, () => ({
+    const normalizedUserId = toText(userId)
+    if (!normalizedUserId) {
+      return null
+    }
+
+    const account = this.getAccount(normalizedUserId)
+    if (!account) {
+      return null
+    }
+
+    const now = Date.now()
+
+    const isHealthy = !account.authInvalid &&
+      !Number(account.authErrorCount || 0) &&
+      !toText(account.lastAuthErrorAt) &&
+      !toText(account.lastAuthErrorMessage)
+
+    // 健康账号：唯一的变化是 lastSuccessAt，节流——距上次落盘未到点就不写
+    if (isHealthy) {
+      const lastFlushedAt = Date.parse(toText(account.lastSuccessAt)) || 0
+      if (now - lastFlushedAt < LAST_SUCCESS_FLUSH_MS) {
+        return account
+      }
+    }
+
+    const patched = this.#patchAccount(normalizedUserId, () => ({
       authInvalid: false,
       authErrorCount: 0,
       lastAuthErrorAt: '',
@@ -503,6 +570,49 @@ class AuthStore {
     }))
 
     return patched ? patched.next : null
+  }
+
+  /**
+   * 撤销一轮「误判的失效标记」——给 api.js 候选循环末尾的
+   * 「全部候选以相同原因失败 → 判定为配置/系统问题」保险用。
+   *
+   * ⚠️ `expectedMessage` 必须与该账号池里**当前**的 lastAuthErrorMessage 一致
+   *    才撤销：并发请求可能刚用别的原因标过这个号，那种标记不归本轮管，
+   *    撤了就是把别的事故现场抹掉。
+   */
+  unmarkAuthFailure (userId, expectedMessage = '') {
+    const normalizedUserId = toText(userId)
+    if (!normalizedUserId) {
+      return null
+    }
+
+    const account = this.getAccount(normalizedUserId)
+    if (!account || !account.authInvalid) {
+      return null
+    }
+
+    if (toText(account.lastAuthErrorMessage) !== toText(expectedMessage)) {
+      return null
+    }
+
+    const patched = this.#patchAccount(normalizedUserId, previous => ({
+      authInvalid: false,
+      // 错误计数本轮 +1 过了，撤回时也减回来（不到 0 以下），保持「计数 ≈ 真实失效次数」
+      authErrorCount: Math.max(0, Number(previous.authErrorCount || 0) - 1),
+      lastAuthErrorAt: '',
+      lastAuthErrorMessage: ''
+    }))
+
+    if (patched) {
+      logger.warn(`${LOG_TAG} 已撤销账号登录态失效标记（判定为系统/配置问题）`, {
+        userId: patched.next.userId,
+        ownerBotUserId: patched.next.ownerBotUserId,
+        isGlobalDefault: patched.next.isGlobalDefault
+      })
+      return patched.next
+    }
+
+    return null
   }
 
   /**
@@ -515,16 +625,19 @@ class AuthStore {
     let found = !normalizedUserId
 
     for (const [accountUserId, account] of Object.entries(pool.accounts)) {
-      // ⚠️⚠️ 这里**不能**包成 `Boolean(normalizedUserId) && …`。
+      // ⚠️⚠️ 左边**必须再包一层 `Boolean`**（2026-10-05 修）。
       //
-      // `&&` 短路时返回的是**左操作数本身**：传空串时 `shouldBeGlobal` 是 `''`
-      // 而不是 `false`，于是落进 #normalizeAccount 的 flag 分支时
-      // `typeof '' === 'boolean'` 为假 → 沿用池里的旧标记 →
-      // **`setGlobalAccount('')` 其实清不掉任何全局标记**（上游就是这个行为）。
+      // 裸写 `normalizedUserId && accountUserId === normalizedUserId` 时，
+      // `&&` 短路返回的是**左操作数本身**：传空串时结果是 `''` 而不是 `false`。
+      // 而 #normalizeAccount 的 flag 分支只认真正的布尔
+      // （`typeof account[key] === 'boolean'`），拿到 `''` 会**沿用池里的旧标记** ——
+      // 于是 `setGlobalAccount('')` 一个全局标记都清不掉（上游一直是这个行为）。
       //
-      // 看着像 bug，但差分测试逐字节钉住了它，重构期间一律照原样保留，
-      // 要不要修由主人定（见交付说明）。
-      const shouldBeGlobal = normalizedUserId && accountUserId === normalizedUserId
+      // 这不是「特意保留的怪癖」，上游就是错的：传空串的语义是「全部取消」，
+      // 清不掉等于这个入口白给。包成布尔之后两条语义都对：
+      //   传 userId → 那一个是 true、其余是 false
+      //   传空串   → 全部是 false
+      const shouldBeGlobal = Boolean(normalizedUserId) && accountUserId === normalizedUserId
       if (shouldBeGlobal) {
         found = true
       }
@@ -766,7 +879,10 @@ class AuthStore {
       userId: account.userId,
       ownerBotUserId: account.ownerBotUserId,
       isGlobalDefault: Boolean(account.isGlobalDefault),
-      priority: Number(account.priority || DEFAULT_PRIORITY),
+      // ⚠️ 用 `??` 而不是 `||`（2026-10-06 修）：`priority: 0` 是**合法值**（数值越小越优先），
+      //    `||` 会把它吞成 DEFAULT_PRIORITY，而这个函数的输出正是锅巴表单契约 ——
+      //    于是「手工把优先级设成 0」的账号在面板上显示 100、保存一次就被静默降级。
+      priority: Number(account.priority ?? DEFAULT_PRIORITY),
       authInvalid: Boolean(account.authInvalid),
       authErrorCount: Number(account.authErrorCount || 0),
       nickname: account.nickname || account.userName || '',
@@ -840,15 +956,43 @@ class AuthStore {
         )
       }
 
+      // ⭐ 救回语义：主人在面板上把关键凭证换成了**新值**（且不是清空），说明这个号
+      //    被人工修过 —— 旧的「登录态失效」标记继续留着的话，请求照样跳过它，等于白修。
+      //    检测到凭证变化就把 authInvalid 和累计的错误计数/时间/文案一并清掉，
+      //    让号回到候选里，由后续真实请求重新验证。
+      //    ⚠️ 空串提交（把字段清空了）不算修复：那号坏得更彻底了，原 flag 必须保持。
+      const credentialChanged = ['token', 'userKey', 'encodeRes', 'userSig'].some(field => {
+        const incoming = toText(item[field])
+        return incoming && incoming !== toText(existing[field])
+      })
+      const rescued = Boolean(existing.authInvalid) && credentialChanged
+      if (rescued) {
+        logger.warn(
+          `${LOG_TAG} 账号 ${userId} 凭证被手动更新（锅巴保存），撤销登录态失效标记与错误计数，等待真实请求重新验证`
+        )
+      }
+
       nextAccounts[userId] = this.#normalizeAccount({
         ...existing,
         userId,
         ownerBotUserId: toText(item.ownerBotUserId),
         isGlobalDefault,
         priority: toNumber(item.priority ?? existing.priority ?? DEFAULT_PRIORITY, DEFAULT_PRIORITY),
-        authInvalid: Boolean(item.authInvalid),
-        authErrorCount: Number(item.authErrorCount ?? existing.authErrorCount ?? 0),
-        nickname: toText(item.nickname || existing.nickname || existing.userName),
+        // ⚠️ 与上面的 isGlobalDefault 同一套语义（2026-10-06 修）：payload 里**没带**这个字段
+        //    （undefined）时沿用池中现值，只有显式布尔才改。写成 `Boolean(item.authInvalid)`
+        //    会把缺字段静默算成 false —— 一个已被标记失效的账号被改回「健康」，
+        //    重新进入 getAuthCandidates 的候选池，每个请求都先拿它试一次并再次标记失效，
+        //    主人从面板上看到的状态也在「正常/失效」之间来回跳。
+        //    这也与本函数里 rescued 的设计意图冲突：只有凭证被换成新值才允许清掉标记。
+        authInvalid: rescued
+          ? false
+          : (typeof item.authInvalid === 'boolean' ? item.authInvalid : Boolean(existing.authInvalid)),
+        authErrorCount: rescued ? 0 : Number(item.authErrorCount ?? existing.authErrorCount ?? 0),
+        // ⚠️ 这里用 `??` 而不是 `||`（2026-10-05 修）：`||` 分不出
+        //    「表单压根没带这个字段」和「表单明确把昵称清空了」——
+        //    后者（`nickname: ''`）会被当成没带，又落回旧值 / `userName`，
+        //    主人把昵称清空之后怎么保存都还在。
+        nickname: toText(item.nickname ?? existing.nickname ?? existing.userName),
         userName: toText(item.userName),
         snsnickname: toText(item.snsnickname),
         remark: toText(item.remark),
@@ -877,8 +1021,8 @@ class AuthStore {
         updatedAt: toText(item.updatedAt || existing.updatedAt),
         lastLoginAt: toText(item.lastLoginAt || existing.lastLoginAt),
         lastSuccessAt: toText(item.lastSuccessAt || existing.lastSuccessAt),
-        lastAuthErrorAt: toText(item.lastAuthErrorAt || existing.lastAuthErrorAt),
-        lastAuthErrorMessage: toText(item.lastAuthErrorMessage || existing.lastAuthErrorMessage)
+        lastAuthErrorAt: rescued ? '' : toText(item.lastAuthErrorAt || existing.lastAuthErrorAt),
+        lastAuthErrorMessage: rescued ? '' : toText(item.lastAuthErrorMessage || existing.lastAuthErrorMessage)
       }, existing)
     }
 

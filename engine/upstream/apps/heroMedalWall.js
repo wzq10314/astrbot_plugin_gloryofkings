@@ -14,16 +14,14 @@
  * 出图走 HeroMedalWall.html（视觉与战报同源），渲染失败时回落到纯文字清单。
  */
 import puppeteer from '../../../lib/puppeteer/puppeteer.js'
-import path from 'path'
 import {
   getImgType,
-  ApiService, resolveCurrentId, readYamlFile, Button, shouldQuote, getUserAvatar,
+  ApiService, resolveCurrentId, readUserData, Button, shouldQuote, getUserAvatar,
   AT_HEAD, stripAtText, resolveTargetUserId, resolveMemberName
 } from '#utils'
 import { fetchHeroMedals, parseMedal, pendingMedalCount } from '../utils/heroMedals.js'
 import { loadPushList } from '../utils/pushStore.js'
 import { heroIconUrl } from '../utils/reportStore.js'
-import { PluginData } from '#components'
 
 /** 默认扫多少个英雄。20 秒左右，再多用户就该以为指令死了 */
 const SCAN_COUNT = 15
@@ -52,7 +50,10 @@ export class HeroMedalWall extends plugin {
 
     let campId = args.campId
     if (!campId && args.index) {
-      const ids = (readYamlFile(path.join(PluginData, 'UserData.yaml')) || {})[userId]?.ids || []
+      // ⚠️ 走封装而不是裸 readYamlFile（2026-10-06 修）：utils/yamlUtils.js 明确声明「文件不存在 /
+      //    内容坏了都原样抛错，不在这里兜底」，而这里没有 try/catch —— 抛出的 ENOENT 或 YAML
+      //    解析错误会冒泡出 wall()，用户什么都收不到。readUserData() 读失败按空表处理。
+      const ids = readUserData()[userId]?.ids || []
       campId = ids[args.index - 1] || ''
       if (!campId) {
         return e.reply(`你没有第 ${args.index} 个绑定的营地ID，发送 #营地ID 看看列表`, shouldQuote())
@@ -67,7 +68,9 @@ export class HeroMedalWall extends plugin {
       }
     }
 
-    const scan = Math.min(Math.max(args.count || SCAN_COUNT, 1), MAX_SCAN)
+    // ⚠️ 用 ?? 不用 ||（2026-10-06 修）：`#称号墙 0` 会被 || 当成假值换成默认 15，
+    //    后面的 Math.max(…, 1)（本意「最少扫 1 个」）于是成了死代码，还白扫 15 个英雄。
+    const scan = Math.min(Math.max(args.count ?? SCAN_COUNT, 1), MAX_SCAN)
 
     let role = {}
     let roleId = ''
@@ -144,8 +147,11 @@ function parseArgs (input = '') {
   const out = { campId: '', index: null, count: null }
   for (const tok of String(input).split(/[\s,，、]+/).filter(Boolean)) {
     if (!/^\d+$/.test(tok)) continue
+    // ⚠️ 按**位数**分派，别用数值大小（2026-10-06 修）：上面注释声明的口径就是「1-2 位是扫描个数、
+    //    3-4 位当绑定序号」，而 `Number(tok) <= MAX_SCAN`（30）会让 31~99 全部掉进 index 分支 ——
+    //    用户发 `#称号墙 50`（想多扫几个）会收到「你没有第 50 个绑定的营地ID」，他根本没提过序号。
     if (tok.length >= 5) out.campId = tok
-    else if (Number(tok) <= MAX_SCAN && out.count === null) out.count = Number(tok)
+    else if (tok.length <= 2 && out.count === null) out.count = Number(tok)
     else if (out.index === null) out.index = Number(tok)
   }
   return out
@@ -156,7 +162,12 @@ async function displayName (e, userId) {
   const cached = String(loadPushList()[String(userId)]?.roleName || '').trim()
   if (cached) return cached
   try {
-    return await resolveMemberName(e, userId) || String(userId)
+    // ⚠️ 传 `e.group` 而不是 `e`（2026-10-06 修）：resolveMemberName 的形参是**群对象**
+    //    （内部走 `group?.pickMember?.()`），而消息事件上并没有 pickMember ——
+    //    TRSS 的 prepareEvent 只挂 bot/friend/group/member/sender/reply，JiuLi 同。
+    //    传 e 进去必然取不到群名片，只会静默落到 QQ 号兜底。
+    //    ⚠️ 同组另外两处（apps/rankTrend.js / apps/scoreTrend.js）已按这个口径改过，这里是第三处。
+    return await resolveMemberName(e.group, userId) || String(userId)
   } catch {
     return String(userId)
   }
@@ -232,8 +243,9 @@ function buildWallView ({ name, picked, medals, scanned, total }) {
     noneCount: none.length,
     noneList: none,
     groups: groups.map(group => ({
-      // 小范围榜（TitleType 1）不带地名，标成「小范围榜」而不是「本区榜」，免得和市级榜混
-      title: group.area ? `${group.area}榜` : '小范围榜',
+      // 小范围榜（TitleType 1）不带地名，标成「小范围榜」而不是「本区榜」，免得和市级榜混。
+      // 和文字兜底 renderWall 共用 groupTitle，两处必须一致
+      title: groupTitle(group),
       tip: group.area ? '营地默认展示的就是这条' : '范围更小，名次数字也更小',
       rows: group.rows
     })),
@@ -243,6 +255,20 @@ function buildWallView ({ name, picked, medals, scanned, total }) {
 }
 
 /* ---------------------------------------------------------- 文案（出图失败时的兜底） */
+
+/**
+ * 一个分组的展示名。**出图和文字兜底必须共用它**（2026-10-06 修）。
+ *
+ * ⚠️⚠️ 原先两处各写一份、结果不一致：
+ *    · 出图（上面 `groups` 的 `title`）写的是 `group.area ? area+'榜' : '小范围榜'`
+ *    · 文字兜底（`renderWall`）写的是 `group.area || '本区'` + '榜'
+ *    于是**同一个分组**在图上叫「小范围榜」、在文字里叫「本区榜」——
+ *    出图失败（puppeteer 起不来）时用户看到的和图上说的不是一个东西。
+ *    现在两处都走这里，改名只改一处。
+ */
+function groupTitle (group) {
+  return group?.area ? `${group.area}榜` : '小范围榜'
+}
 
 function renderWall ({ name, picked, medals, scanned, total }) {
   const { groups, none } = groupMedals(picked, medals)
@@ -255,7 +281,7 @@ function renderWall ({ name, picked, medals, scanned, total }) {
   }
 
   for (const group of groups) {
-    lines.push('', `📍 ${group.area || '本区'}榜（${group.rows.length}）`)
+    lines.push('', `📍 ${groupTitle(group)}（${group.rows.length}）`)
     for (const row of group.rows) {
       lines.push(`· 第 ${row.rank} ${row.hero}${row.power ? `　战力 ${row.power}` : ''}`)
     }

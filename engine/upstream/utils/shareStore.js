@@ -29,7 +29,7 @@ import { PluginData, Config } from '#components'
 import { readYamlFile, writeYamlFile } from './yamlUtils.js'
 import { quarantineCorrupt } from './safeStore.js'
 import { getCurrentId, getBoundIds, readUserData } from './localBind.js'
-import authStore from './authStore.js'
+import authStore, { isUsableAuth } from './authStore.js'
 
 const CACHE_FILE = path.join(PluginData, 'share', 'idcache.yaml')
 const CACHE_SCHEMA = 1
@@ -43,8 +43,16 @@ const CACHE_SCHEMA = 1
  */
 export const maskToken = token => {
   const text = String(token || '')
-  if (text.length <= 10) return text ? '已配置' : '未配置'
-  return `${text.slice(0, 6)}…${text.slice(-4)}`
+  if (!text) return '未配置'
+  // ⚠️⚠️ 阈值必须**覆盖截取宽度**（2026-10-06 修）。截出来是 6 + 1 + 4 = 11 个字符，
+  //    原先阈值写成 `<= 10`：长度 11 的令牌输出 10 个原文字符（比输入还长一位），
+  //    长度 12~15 时也会把大半串贴出去。而这些调用点全是**群内回显**
+  //    （shareBind 的 `#营地共享库`、local/distDeploy 的管理密钥），等于把密钥发进群里。
+  //    短到没法安全截取的（≤12）一律只说「已配置」。
+  if (text.length <= 12) return '已配置'
+  const keepStart = Math.min(6, Math.floor(text.length / 3))
+  const keepEnd = Math.min(4, Math.floor(text.length / 4))
+  return `${text.slice(0, keepStart)}…${text.slice(-keepEnd)}`
 }
 
 /**
@@ -73,8 +81,52 @@ const CIRCUIT_MAX_MS = 10 * 60 * 1000
 /** 落盘缓存整份丢弃重建的时限，防止 qq 键无限增长 */
 const DISK_MAX_AGE_MS = 24 * 3600 * 1000
 
+/**
+ * 落盘条目的存活时间。
+ *
+ * ⚠️⚠️ **必须和 `CACHE_TTL_MS` 分开，而且要远长于 flush 的 30 秒 debounce**
+ *    （2026-10-06 修）。原先落盘条目直接沿用内存的 `until`（= 写入时刻 + 5 秒），
+ *    而 `flushDiskCache` 最早在**首次写入后 30 秒**才跑，于是
+ *    `entry.until <= now` **恒成立** → 每个条目 100% 被过滤掉 → **盘上永远是空表**，
+ *    「重启后第一条指令也不慢」这个设计目标完全没达成。
+ *
+ *    实测（真等 30 秒跑完整周期）：t=0 写内存缓存 1 条，t=30301ms flush 完成，
+ *    盘上 `entries` 条数 = **0**（期望 1）。线上 `data/share/idcache.yaml`
+ *    恒为 45 字节的 `schema: 1 / savedAt: <一直在变> / entries: {}` ——
+ *    说明 flush 在反复落盘，只是每次写的都是空表（顺带 30 秒一次写盘放大）。
+ *
+ *    现在落盘条目按自己的寿命判活（6 小时），而**读回内存时**仍然只给
+ *    `CACHE_TTL_MS` 那么长的可用时间 —— 这样既让重启后的第一条指令吃到缓存，
+ *    又不会让一份旧快照在内存里赖着不走（「换个机器人马上能用」的取舍不变）。
+ */
+const DISK_TTL_MS = 6 * 3600 * 1000
+
+/**
+ * ⚠️⚠️ 模块级可变状态**全部锚在 `globalThis` 上**（2026-10-06 修）。
+ *
+ * 原因：JiuLi 的热重载会给 `plugins/` 下**每个**模块追加 `?jiuli_reload=<代数>`
+ * 查询串（`lib/core/reload-hooks.js`），把整张模块图重新求值一遍 —— 模块顶层
+ * 每重载一次就跑一次。于是同一个进程里会并存**多份** `shareStore` 实例，
+ * 各有各的 Map。落到落盘缓存上就是**数据丢失**（实测复现）：
+ *
+ *   ① 盘上 3 条 → 模块 A 读进自己的 `memoryCache`
+ *   ② 另一代次 B 落盘，盘上变成 4 条（多了 444444）
+ *   ③ A 的 30 秒 debounce 到期，`flushDiskCache()` 拿 **A 自己那份** `memoryCache`
+ *      整份覆盖 → 盘上只剩 A 知道的 2 条，**444444 被抹掉**
+ *      （实测输出：落盘后 `222222, 333333`）
+ *
+ * 锚定后进程内只剩一份权威内存，`flushDiskCache` 的「整份覆盖」才是正确的
+ * （它本来就是按「缓存内容全在 memoryCache 里」设计的）。
+ *
+ * 下面用「全局 holder + 局部别名」的手法：Map 类状态只被增删改、从不整体重新赋值，
+ * 所以 `const x = (holder.x ||= new Map())` 之后**其余代码一行都不用动**。
+ * 只有会被整体赋值的 `diskLoaded` / `flushTimer` 走 `holder.` 直接访问。
+ */
+const STATE_KEY = '__gokShareStoreState'
+const holder = (globalThis[STATE_KEY] ||= {})
+
 /** 当轮已经合并过、不必重复请求的 QQ。查询合并用，见 inflight 的注释 */
-const inflight = new Map()
+const inflight = (holder.inflight ||= new Map())
 
 /**
  * 「这个 QQ 在共享库里有记录」的本地标记 —— 也就是「他开过共享」。
@@ -87,28 +139,32 @@ const inflight = new Map()
  * 判据换成「库里还有没有你的记录」就天然自洽了：你一旦关掉共享，服务端会删记录并立墓碑，
  * 别的机器人再查你就是 404，也就不会再替你上传了。
  */
-const knownShared = new Map()
+const knownShared = (holder.knownShared ||= new Map())
 
 /** 同一个 QQ 多久对一次账。库里数据变得很慢，每小时一次足够 */
 const RECONCILE_INTERVAL_MS = 60 * 60 * 1000
-const lastReconcileAt = new Map()
+const lastReconcileAt = (holder.lastReconcileAt ||= new Map())
 
 /** qq -> {campId, until, fetchedAt, updatedAt}。campId 为空串表示「确认没有」 */
-const memoryCache = new Map()
+const memoryCache = (holder.memoryCache ||= new Map())
 
 /**
  * 每个 QQ 一个代号。任何「本地绑定被改动」都会把代号加一，
  * 用来丢弃那些「发出时还没撤销、回来时已经撤销」的在途响应。
+ *
+ * 也要锚定：老代次那个在途请求回来时会拿**老代次的**代号比对，
+ * 代号表若是新的，撤销动作就白做了（会把已撤销的营地号又写回缓存）。
  */
-const generation = new Map()
+const generation = (holder.generation ||= new Map())
 
-const circuit = { failures: 0, openUntil: 0, backoffMs: CIRCUIT_BASE_MS }
+const circuit = (holder.circuit ||= { failures: 0, openUntil: 0, backoffMs: CIRCUIT_BASE_MS })
 
 /** 日志节流：一个挂掉的服务端不该把日志刷爆 */
-const warnAt = new Map()
+const warnAt = (holder.warnAt ||= new Map())
 
-let diskLoaded = false
-let flushTimer = null
+// 这两个会被整体赋值，所以不用局部别名，直接走 holder（见 STATE_KEY 的注释）
+holder.diskLoaded ??= false
+holder.flushTimer ??= null
 
 /* --------------------------------------------------------------- 文案 */
 
@@ -174,7 +230,14 @@ export function isShareReady () {
  */
 function hasUsableGlobalAccount () {
   try {
-    return authStore.listAccounts().some(account => account.isGlobalDefault && !account.authInvalid)
+    // ⚠️⚠️ 判据必须与 authStore.isUsableAuth 一致（2026-10-06 修）。
+    //    原先只判 `isGlobalDefault && !authInvalid`，少了「凭证是否齐全」这一层：
+    //    锅巴面板上建一个只有 userId + 全局开关、凭证留空的号，这里就判「有可用账号」，
+    //    于是共享库下发的营地ID 被认成可用、返回 source:'shared' 并写进本机 UserData.yaml；
+    //    而 api.js 侧的候选池是空的、请求注定失败，用户既拿不到 degraded 提示也恢复不了
+    //    （fromShare 绑定因本地优先会长期压住共享值）。
+    return authStore.listAccounts().some(account =>
+      account.isGlobalDefault && isUsableAuth(account))
   } catch {
     return false
   }
@@ -183,8 +246,8 @@ function hasUsableGlobalAccount () {
 /* --------------------------------------------------------------- 落盘缓存 */
 
 function loadDiskCache () {
-  if (diskLoaded) return
-  diskLoaded = true
+  if (holder.diskLoaded) return
+  holder.diskLoaded = true
 
   try {
     const raw = readYamlFile(CACHE_FILE)
@@ -196,10 +259,15 @@ function loadDiskCache () {
     const now = Date.now()
     for (const [qq, entry] of Object.entries(entries)) {
       if (!entry || typeof entry !== 'object') continue
-      if (Number(entry.until) <= now) continue
+      // 按**落盘寿命**判活（老文件没有 diskUntil，退回 until —— 那种文件本来就是空的）
+      const aliveUntil = Number(entry.diskUntil) || Number(entry.until) || 0
+      if (aliveUntil <= now) continue
+      // ⚠️ 读回内存时只给 `CACHE_TTL_MS`，不是给剩余的 diskUntil ——
+      //    缓存的用途是「重启后第一条指令不慢」，不是「这份快照能一直用」。
+      //    给足 6 小时会让「换个机器人马上能用」退化成「最多 6 小时才看到」。
       memoryCache.set(qq, {
         campId: String(entry.campId || ''),
-        until: Number(entry.until) || 0,
+        until: now + CACHE_TTL_MS,
         fetchedAt: Number(entry.fetchedAt) || 0,
         updatedAt: Number(entry.updatedAt) || 0
       })
@@ -214,13 +282,13 @@ function loadDiskCache () {
 
 /** 落盘走 30 秒 debounce：查询是高频路径，没必要每来一条就写一次盘 */
 function scheduleFlush () {
-  if (flushTimer) return
+  if (holder.flushTimer) return
 
-  flushTimer = setTimeout(() => {
-    flushTimer = null
+  holder.flushTimer = setTimeout(() => {
+    holder.flushTimer = null
     flushDiskCache()
   }, 30000)
-  flushTimer.unref?.()
+  holder.flushTimer.unref?.()
 }
 
 function flushDiskCache () {
@@ -229,16 +297,24 @@ function flushDiskCache () {
     const entries = {}
 
     for (const [qq, entry] of memoryCache) {
-      if (entry.until <= now) continue
+      // ⚠️ 这里**不能**再按内存的 `until` 过滤（那是 5 秒），否则 flush 的 30 秒
+      //    debounce 一到期，条目必然已经过期 → 盘上永远是空表（见 DISK_TTL_MS 的说明）。
+      //    落盘寿命从**观测时刻**起算，和内存可用期解耦。
+      const base = Number(entry.fetchedAt) || now
+      const diskUntil = base + DISK_TTL_MS
+      if (diskUntil <= now) continue
       entries[qq] = {
         campId: entry.campId,
+        // until 保留原义（内存可用到什么时候），落盘寿命单独记 diskUntil
         until: entry.until,
+        diskUntil,
         fetchedAt: entry.fetchedAt,
         updatedAt: entry.updatedAt
       }
     }
 
-    // 直接整份覆盖：缓存内容全在 memoryCache 里，不需要先读盘再合并
+    // 整份覆盖是正确的：`memoryCache` 现在是**进程内唯一权威**（锚在 globalThis 上，
+    // 见 STATE_KEY 的注释）。历史上这里是「多份实例各写各的」，那才会互相抹数据。
     writeYamlFile(CACHE_FILE, { schema: CACHE_SCHEMA, savedAt: now, entries })
   } catch (error) {
     warnOnce('flush', `[营地共享] 缓存落盘失败：${error.message}`)
@@ -247,9 +323,9 @@ function flushDiskCache () {
 
 /** 进程退出前把脏数据刷下去。pm2 restart 时会走到这里 */
 function flushNow () {
-  if (flushTimer) {
-    clearTimeout(flushTimer)
-    flushTimer = null
+  if (holder.flushTimer) {
+    clearTimeout(holder.flushTimer)
+    holder.flushTimer = null
   }
   flushDiskCache()
 }
@@ -260,8 +336,22 @@ function flushNow () {
  * 用 'exit' 而不是 SIGINT/SIGTERM：宿主 Yunzai 自己也在监听这两个信号，
  * 多挂一个监听器会让「默认退出行为」失效——两边都不 exit 的话进程就停不下来了。
  * 'exit' 只是被通知，不改变退出流程，而且这里做的全是同步写盘，正好合规。
+ *
+ * ⚠️⚠️ **必须用 globalThis 标记保证只注册一次**（2026-10-06 修）。
+ *    这个模块的顶层语句在 JiuLi 热重载时会**重新求值**（内核给 plugins/ 下每个模块
+ *    追加 `?jiuli_reload=<代数>`，见 STATE_KEY 的注释），于是 `process.once` 每热重载
+ *    一代就多挂一个监听器 —— 实测线上已经报出
+ *    `MaxListenersExceededWarning: Possible EventEmitter memory leak detected.
+ *     11 exit listeners added to [process]. MaxListeners is 10.`
+ *    超过 10 个之后 Node 还会开始丢弃告警，泄漏就彻底隐身了。
+ *    注意 `process.once` 的 once 是「触发一次就摘掉」，**不是**「只注册一次」——
+ *    进程不退出的话它会一直累积。所以判据要挂在一个跟模块实例无关的地方。
  */
-process.once('exit', flushNow)
+const EXIT_HOOK_KEY = '__gokShareStoreExitHook'
+if (!globalThis[EXIT_HOOK_KEY]) {
+  globalThis[EXIT_HOOK_KEY] = true
+  process.once('exit', flushNow)
+}
 
 /* --------------------------------------------------------------- 缓存读写 */
 
@@ -401,6 +491,14 @@ function adoptSharedBind (qq, campIds, currentCampId) {
       current: Math.max(0, campIds.indexOf(currentCampId)),
       // 标记来源：好让「关闭共享」时能把这份清掉，也不跟用户自己绑的混为一谈
       fromShare: true,
+      // ⚠️⚠️ 还要**逐个记下是哪些 id 来自共享库**（2026-10-06 修）。
+      //    只靠条目级的 `fromShare` 不够：用户之后在本机自己绑一个号时，
+      //    `authStore.bindCampUserId` 是**原地改 `entry.ids`**、不动 `fromShare`，
+      //    于是那条里就混了「共享来的」和「自己绑的」，而 `fromShare` 仍是 true。
+      //    关闭共享时按条目整条 `delete`，会把**用户自己绑的号一起删掉**。
+      //    实测：ids=[共享来的1580886057, 自绑的1745513318] → 关共享后整条没了。
+      //    有了这个名单，`dropAdoptedBind` 就能只摘共享来的那些。
+      adoptedIds: [...campIds],
       sharedAt: Date.now()
     }
     writeYamlFile(USER_DATA_FILE, data)
@@ -411,15 +509,60 @@ function adoptSharedBind (qq, campIds, currentCampId) {
   }
 }
 
-/** 把「从共享库落下来的」那份清掉。用户关共享、或者库里没他时调 */
+/**
+ * 把「从共享库落下来的」那份清掉。用户关共享、或者库里没他时调。
+ *
+ * ⚠️⚠️ **只摘共享来的那几个 id，不能整条 delete**（2026-10-06 修）。
+ *    条目的 `fromShare: true` 只说明「这条**最初**是共享落地来的」，
+ *    不代表里面每个 id 都是共享来的 —— 用户后来自己绑的号混在同一条里
+ *    （`bindCampUserId` 原地追加、保留 fromShare）。整条删就等于
+ *    「关掉共享」顺手把用户自己绑的营地号也删了，用户会以为数据丢了。
+ *
+ *    三种情况分别处理：
+ *      · 有 `adoptedIds` 名单：只摘名单里的，剩下的留着（自己绑的那些）
+ *      · 老数据没名单（改动前落地的）：保守起见**整条删**，保持原行为 ——
+ *        没有名单就无法分辨哪个是自己绑的，乱留会让「来自共享库」的脏绑定赖着不走
+ *      · 摘完一个不剩：把整条删掉，不留空壳
+ */
 export function dropAdoptedBind (qq) {
   try {
     const data = readUserData()
-    if (!data[qq]?.fromShare) return
+    const entry = data[qq]
+    if (!entry?.fromShare) return
 
-    delete data[qq]
+    const adopted = Array.isArray(entry.adoptedIds) ? entry.adoptedIds.map(String) : null
+
+    // 老数据（没有 adoptedIds 名单）：维持「整条删」的旧行为
+    if (!adopted) {
+      delete data[qq]
+      writeYamlFile(USER_DATA_FILE, data)
+      logger?.debug?.(`[营地共享] ${qq} 从共享库落到本机的那份已清除（无来源名单，整条清）`)
+      return
+    }
+
+    const adoptedSet = new Set(adopted)
+    const kept = (Array.isArray(entry.ids) ? entry.ids : []).filter(id => !adoptedSet.has(String(id)))
+
+    if (!kept.length) {
+      delete data[qq]
+      writeYamlFile(USER_DATA_FILE, data)
+      logger?.debug?.(`[营地共享] ${qq} 的绑定全部来自共享库，整条已清除`)
+      return
+    }
+
+    // 还有自己绑的号：只摘共享来的，`current` 跟着重算到「当前那个号」的新下标上
+    const currentId = String(entry.ids?.[entry.current] ?? '')
+    const next = {
+      ...entry,
+      ids: kept,
+      current: Math.max(0, kept.indexOf(currentId)),
+      fromShare: false
+    }
+    // 摘干净就把标记和名单一起去掉，这条从此就是「用户自己绑的」
+    delete next.adoptedIds
+    data[qq] = next
     writeYamlFile(USER_DATA_FILE, data)
-    logger?.debug?.(`[营地共享] ${qq} 从共享库落到本机的那份已清除`)
+    logger?.debug?.(`[营地共享] ${qq} 已摘掉 ${adopted.length} 个共享来的绑定，保留 ${kept.length} 个自己绑的`)
   } catch (error) {
     warnOnce('adopt-drop', `[营地共享] 清理落地数据失败：${error?.message || error}`)
   }
@@ -565,6 +708,22 @@ export async function reconcileNow (userId) {
  */
 export function isKnownShared (userId) {
   return knownShared.get(String(userId ?? '').trim()) === true
+}
+
+/**
+ * 抹掉「这个 QQ 开过共享」的本地镜像。
+ *
+ * ⚠️ 用户**显式关闭共享**时必须调它（`shareUsers.disableSharing`）。
+ *    原先唯一的清理点在下面网络分支里（查询返回 404 才删），而「关闭共享」走的是
+ *    `revokeBind`，不经过那条分支 —— 于是 `knownShared` 一直留着 true，
+ *    `syncUserBind` 的第二个判据继续成立，用户下次绑号时**开关自己弹回 true**
+ *    并把数据重新上传（实测复现：关闭后 knownShared 仍为 true，
+ *    再发 `#绑定营地` → 真的发出 PUT /api/v1/bind，开关变 enabled:true）。
+ *    用户明确 opt-out 过，绝不能因为一次网络路径没走到就复活。
+ */
+export function forgetKnownShared (userId) {
+  const qq = String(userId ?? '').trim()
+  if (qq) knownShared.delete(qq)
 }
 
 /* --------------------------------------------------------------- 对外主函数 */

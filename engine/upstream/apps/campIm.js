@@ -20,6 +20,7 @@ import { shouldQuote } from '#utils'
 import * as client from '../utils/campImClient.js'
 import * as store from '../utils/campImStore.js'
 import { pushToOwner, ownerOf, getLastPush } from '../utils/campImPush.js'
+import { readQuoted as readQuotedImpl } from '../utils/quoted.js'
 import authStore from '../utils/authStore.js'
 
 /** 配置读取（现读，改完不用重启） */
@@ -40,9 +41,27 @@ function pollMs () {
 
 // ────────────────────────── 轮询 ──────────────────────────
 
+/**
+ * ⚠️⚠️ 轮询状态**必须锚在 `globalThis` 上，不能用模块级变量**（2026-10-06 修）。
+ *
+ * 原因：JiuLi 的热重载会给 `plugins/` 下**每个**模块追加 `?jiuli_reload=<代数>`
+ * 查询串（`lib/core/reload-hooks.js`），把整张模块图重新求值一遍 —— 模块顶层代码
+ * 每重载一次就跑一次。于是模块级的 `let pollTimer` 每次都变成**新变量**，
+ * 「`if (pollTimer) return`」这道幂等锁形同不存在：每一代模块都各排各的定时器、
+ * 各跑各的 `pollOnce()`（会真的推消息、真的写盘）。
+ *
+ * 实测后果：`JiuLi-out.log` 里「启动中」110 次，而「营地消息轮询已启动」82 次，
+ * 单次插件重载 117 次；按日志分段统计，**单个进程内最多并存 7 条 3 秒轮询链**。
+ * 这也是 `campImStore` 出现多实例覆盖写的直接原因（见那边的 save 注释）。
+ *
+ * 锚到 `globalThis` 后，跨模块代次共享同一个定时器句柄，幂等锁才真正生效；
+ * 再配合类上的 `onUnload()`（框架 `loader.js` 卸载时会调）把定时器清干净。
+ */
+const POLL_STATE_KEY = '__gokCampImPollState'
+const pollState = (globalThis[POLL_STATE_KEY] ||= { timer: null, bootTimer: null, polling: false })
+
 /** 重入闸：上一轮没跑完就跳过这一轮 */
-let polling = false
-let pollTimer = null
+const isPolling = () => pollState.polling
 /** 上次同步开关时的快照 —— 变了才调服务端，别每轮都打 */
 let lastSwitchSnapshot = ''
 
@@ -57,8 +76,8 @@ function switchSnapshot () {
  * ⚠️ 逐条处理、逐条推进游标 —— 中间某条推失败不能卡住后面的。
  */
 async function pollOnce () {
-  if (polling) return
-  polling = true
+  if (isPolling()) return
+  pollState.polling = true
   try {
     // ⭐ 开关变了就同步给服务端（主人在锅巴页面改完，这里几秒内生效）
     const snap = switchSnapshot()
@@ -104,7 +123,7 @@ async function pollOnce () {
     // 服务没起来是常态（还没部署），debug 级别就够，别刷屏
     logger.debug?.(`[营地消息] 拉取失败：${e?.message || e}`)
   } finally {
-    polling = false
+    pollState.polling = false
   }
 }
 
@@ -120,24 +139,32 @@ async function dispatch (msg) {
   }
 }
 
-/** 启动轮询（幂等） */
+/**
+ * 启动轮询（幂等）。
+ *
+ * ⚠️ 幂等锁看的是 `pollState.timer`（globalThis 上的跨代次单例），不是模块级变量 ——
+ *    热重载后模块级变量会重置，锁就失效了。见 pollState 的注释。
+ */
 function startPolling () {
-  if (pollTimer) return
+  if (pollState.timer) return
   const tick = async () => {
     if (pollEnabled()) await pollOnce()
-    pollTimer = setTimeout(tick, pollMs())
-    pollTimer.unref?.()
+    pollState.timer = setTimeout(tick, pollMs())
+    pollState.timer.unref?.()
   }
   // 启动后先等一下再拉，别和插件加载抢资源
-  pollTimer = setTimeout(tick, 5000)
-  pollTimer.unref?.()
+  pollState.timer = setTimeout(tick, 5000)
+  pollState.timer.unref?.()
   logger.info(`[${PluginName}] 营地消息轮询已启动（间隔 ${pollMs()}ms）`)
 }
 
-/** 停掉轮询 */
+/** 停掉轮询（onUnload 调，热重载时把定时器交还给框架） */
 function stopPolling () {
-  if (pollTimer) clearTimeout(pollTimer)
-  pollTimer = null
+  if (pollState.timer) clearTimeout(pollState.timer)
+  pollState.timer = null
+  if (pollState.bootTimer) clearTimeout(pollState.bootTimer)
+  pollState.bootTimer = null
+  pollState.polling = false
 }
 
 /**
@@ -201,6 +228,24 @@ async function seedSeenFromQueue () {
 // ────────────────────────── 指令 ──────────────────────────
 
 export class CampIm extends plugin {
+  /**
+   * 插件卸载 / 热重载时清掉定时器。
+   *
+   * 框架支持这个钩子（`lib/core/loader.js` 的 `unloadPlugin` 会取
+   * `initInstances` 里那个实例的 `onUnload` 并 await），但本插件原先**一个都没实现** ——
+   * 于是每次热重载，老一代模块的 3 秒轮询链都继续跑，单进程里越叠越多。
+   * 定时器本身已锚在 globalThis（见 pollState），这里再显式停一次，
+   * 保证「卸载即停」，不依赖新代次是否恰好也启动了轮询。
+   */
+  async onUnload () {
+    try {
+      stopPolling()
+      logger.debug?.('[营地消息] 已停止轮询定时器（插件卸载）')
+    } catch (e) {
+      logger.debug?.(`[营地消息] 卸载清理失败：${e?.message || e}`)
+    }
+  }
+
   constructor () {
     super({
       name: '王者营地消息',
@@ -544,69 +589,11 @@ async function tryQuoteImpl (e) {
 /**
  * 读被引用消息的纯文本。
  *
- * 各家适配器给的口子不一样，逐个试：
- *   · `e.getReply()` —— 云崽 loader 在收到 reply 段时挂的（`loader.js:367`）
- *   · `bot.getMsg(id)` / `e.group.getMsg(id)` / `e.friend.getMsg(id)`
- *   · `bot.sendApi('get_msg')` —— Gscore-Adapter 走这条
- *   · `getChatHistory` —— 部分适配器只给这条
- *
- * ⚠️ 全失败要返回 null（不是 ''）—— 调用方靠它区分「读不到」和「读到空的」。
+ * ⚠️ 实现搬去 `utils/quoted.js` 了 —— `apps/watchBattle.js` 的 `#营地开播` 也要用
+ *    （引用开播提示时按人名挑回原来那一场），两边各留一份必然漂移。
+ *    这里只做转发，调用点不用改。
  */
-async function readQuoted (e) {
-  const refId = e.reply_id
-  if (!refId) return null
-
-  const bot = e.bot || globalThis.Bot
-
-  // ① 云崽自带的（yenai 也走这条，实测能拿到东西）
-  try {
-    if (typeof e.getReply === 'function') {
-      const t = flattenMsg(await e.getReply())
-      if (t) return t
-    }
-  } catch { /* 换下一条路 */ }
-
-  // ② 适配器各自的
-  for (const fn of [
-    () => bot?.getMsg?.(refId),
-    () => e.group?.getMsg?.(refId),
-    () => e.friend?.getMsg?.(refId),
-    () => bot?.sendApi?.('get_msg', { message_id: refId }),
-    () => e.group?.getChatHistory?.(e.source?.seq, 1),
-    () => e.friend?.getChatHistory?.(e.source?.time, 1)
-  ]) {
-    try {
-      let r = await fn()
-      if (Array.isArray(r)) r = r.pop()        // 聊天记录返回的是数组
-      const t = flattenMsg(r)
-      if (t) return t
-    } catch { /* 换下一条路 */ }
-  }
-
-  return null
-}
-
-/** 把各种形状的「消息」对象拍平成纯文本；拍不出东西返回 '' */
-function flattenMsg (r) {
-  if (!r) return ''
-  if (typeof r === 'string') return r
-
-  // OneBot 的 get_msg 返回：{ message: [...], raw_message: '...' }
-  if (typeof r.raw_message === 'string' && r.raw_message) return r.raw_message
-  if (typeof r.message === 'string') return r.message
-
-  const arr = Array.isArray(r.message)
-    ? r.message
-    : Array.isArray(r.msg_elements) ? r.msg_elements : null
-  if (!arr) return ''
-
-  return arr.map(seg => {
-    if (!seg) return ''
-    if (typeof seg === 'string') return seg
-    if (seg.type === 'text') return seg.text ?? seg.data?.text ?? ''
-    return ''
-  }).join('')
-}
+const readQuoted = (e) => readQuotedImpl(e)
 
 /**
  * 这条被引用的消息是不是「营地推送」。
@@ -630,10 +617,16 @@ function isCampPush (text) {
  *
  * ⚠️ 用 `Object.create` 拿原型方法，**不要 `new CampIm()`** ——
  *    constructor 里会跑 `super()` 注册 rule，在这里再跑一次是重复注册。
+ *
+ * ⚠️ 这个 8 秒定时器也要**锚在 globalThis 上**：热重载会让模块顶层重跑，
+ *    不锚的话每重载一次就多排一个 —— 那些回调各自 `startPolling()`，
+ *    正是「单进程 7 条轮询链」的来源。`onUnload` 里一并清掉。
  */
 function bootstrap () {
+  if (pollState.bootTimer) return
   // 启动后 8 秒再动：别和插件加载、别的定时任务抢资源
-  setTimeout(async () => {
+  pollState.bootTimer = setTimeout(async () => {
+    pollState.bootTimer = null
     try {
       if (!pollEnabled()) {
         logger.info(`[${PluginName}] 营地消息未启用（配置 campImEnabled）`)
@@ -652,7 +645,8 @@ function bootstrap () {
     } catch (e) {
       logger.warn(`[${PluginName}] 营地消息启动失败：${e?.message || e}`)
     }
-  }, 8000).unref?.()
+  }, 8000)
+  pollState.bootTimer.unref?.()
 }
 
 bootstrap()

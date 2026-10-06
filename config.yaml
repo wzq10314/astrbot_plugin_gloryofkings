@@ -7,6 +7,10 @@ engine_auto_browser_system: true
 engine_node: ''
 engine_npm_registry: https://registry.npmmirror.com
 browser_path: ''
+# 观战用 ffmpeg 的完整可执行文件路径；留空自动检测，填写后只认此路径。
+ffmpegPath: ''
+# 运维提醒收件人：已有管理员的用户标识；留空使用首位管理员。
+masterNotify: []
 bot_overrides: '{}'
 onlineReminder: true
 battleResultCron: 0 */2 * * * *

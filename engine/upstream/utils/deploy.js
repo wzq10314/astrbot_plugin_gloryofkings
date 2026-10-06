@@ -30,6 +30,7 @@
  * 两者不重叠，怎么更新都碰不到。
  */
 
+import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import zlib from 'node:zlib'
@@ -345,6 +346,43 @@ export async function downloadPackage ({ name, sha, url, token, timeout = 180000
 /* ------------------------------------------------------------ 一站式安装 */
 
 /**
+ * 按台账核对「装上去的那份文件现在还对不对」。
+ *
+ * ⚠️⚠️ 为什么需要它（2026-10-05 修）：`installPackage` 原来只比 `state.sha === meta.sha`
+ *    就认为「已是最新」，**完全不看盘上的文件**。只要台账被人为或异常情况写歪一次
+ *    （实测主人这台机器上：台账记 `6ba6262`，而 `server/watch-server.js` 的内容
+ *    逐字节等于 `767090e` —— 有人手工替换过文件），此后每次 `#营地观战部署`
+ *    都会：先判「版本没变、不用更新」→ 只重启进程 → **台账永远停在旧 sha**。
+ *    于是台账再也回答不了「线上跑的是哪个版本」。
+ *
+ *    改成同时核对文件大小：任何一个记录在案的文件丢了、或者大小对不上，
+ *    就当「装的那份不对」→ 走完整下载+解压流程，顺手把台账写正。
+ *    用大小而不是哈希：服务端包 ~160KB、十几个文件，`statSync` 是微秒级，
+ *    而算哈希要把每个文件都读一遍 —— 这个函数每次部署/查状态都会调到，不值得。
+ *    （大小对不上一定有问题；大小凑巧相同的改动，靠上游 sha 变化兜住。）
+ *
+ * @returns {{ok: boolean, bad?: string}} ok=false 时 `bad` 是第一个对不上的文件
+ */
+function verifyInstalled (destDir, state) {
+  if (!state || !Array.isArray(state.files) || !state.files.length) return { ok: false, bad: '(台账没有文件清单)' }
+  const sizes = state.sizes && typeof state.sizes === 'object' ? state.sizes : null
+  // 老台账没记 sizes（升级前装的）→ 没法核对，只能认它是最新的（下次部署会补上 sizes）
+  if (!sizes) return { ok: true }
+  for (const rel of state.files) {
+    const abs = path.join(destDir, rel)
+    try {
+      const st = fs.statSync(abs)
+      if (!st.isFile()) return { ok: false, bad: rel }
+      const want = sizes[rel]
+      if (typeof want === 'number' && st.size !== want) return { ok: false, bad: rel }
+    } catch {
+      return { ok: false, bad: rel }
+    }
+  }
+  return { ok: true }
+}
+
+/**
  * 查版本 → 比对本地 → 按需下载 → 解压 → 清旧文件 → 写台账。
  *
  * @param {object} opts
@@ -366,13 +404,37 @@ export async function installPackage ({
   const state = readInstallState(destDir)
   const entryOk = entry ? fs.existsSync(path.join(destDir, entry)) : true
 
-  // 版本没变、文件也齐 → 什么都不做，让调用方直接去重启进程
-  if (state?.sha === meta.sha && entryOk) {
+  // 版本没变、文件也齐**而且内容对得上** → 什么都不做，让调用方直接去重启进程
+  // ⚠️ 那个 verifyInstalled 不能省：只看 sha 的话，文件被手工换过也照样判「已是最新」，
+  //    台账就永远停在旧 sha（见 verifyInstalled 的注释）
+  const intact = verifyInstalled(destDir, state)
+  if (state?.sha === meta.sha && entryOk && intact.ok) {
     return { ok: true, sha: meta.sha, updated: false, files: state.files || [] }
+  }
+  if (state?.sha === meta.sha && !intact.ok) {
+    logger?.mark?.(`[deploy] ${name} 台账记的是最新版，但 ${intact.bad} 与记录不符，重新装一遍`)
   }
 
   const down = await downloadPackage({ name, sha: meta.sha, url, token, logger })
   if (!down.ok) return { ok: false, message: down.message }
+
+  // ⚠️⚠️ 下载完**必须校验一次**（2026-10-06 修）。服务端其实已经把两份校验材料都给过来了
+  //    （`fetchPackageMeta` 的 `sha256`、下载响应头 `x-gok-sha`），原先取了却没有任何消费点，
+  //    解压前唯一的判据是下面那句「文件数不为 0」—— 而 gzip 的 CRC 只能发现传输损坏，
+  //    发现不了内容被换过。这条链是**明文 HTTP**（见 local/distDeploy 的说明），
+  //    下下来的又是直接落盘、随后被 pm2 执行的 JS，等于把「装哪一份」完全交给网络路径。
+  if (meta.sha256) {
+    const got = crypto.createHash('sha256').update(down.buffer).digest('hex')
+    if (got !== String(meta.sha256).toLowerCase()) {
+      logger?.warn?.(`[deploy] ${name} 校验不过：期望 ${String(meta.sha256).slice(0, 12)}，实际 ${got.slice(0, 12)}`)
+      return { ok: false, message: '下载的包校验没过（传输中可能损坏或被替换），重试一次' }
+    }
+  }
+  // 响应头回的版本也必须就是我们要的那一版，否则是缓存串了包
+  if (down.sha && meta.sha && String(down.sha) !== String(meta.sha)) {
+    logger?.warn?.(`[deploy] ${name} 版本不一致：要 ${String(meta.sha).slice(0, 8)}，服务器给的 ${String(down.sha).slice(0, 8)}`)
+    return { ok: false, message: '服务器给的包版本和要的不一致，重试一次' }
+  }
 
   let result
   try {
@@ -391,10 +453,18 @@ export async function installPackage ({
   // 上游删掉的文件，靠台账补删
   const removed = pruneRemoved(destDir, state?.files, result.files, logger)
 
+  // ⭐ 顺手记下每个文件的大小 —— 下次判断「要不要重装」时拿它核对实际内容
+  //    （见 verifyInstalled；没有它，文件被换掉也发现不了）
+  const sizes = {}
+  for (const rel of result.files) {
+    try { sizes[rel] = fs.statSync(path.join(destDir, rel)).size } catch {}
+  }
+
   writeInstallState(destDir, {
     name,
     sha: meta.sha,
     files: result.files,
+    sizes,
     installedAt: new Date().toISOString()
   }, logger)
 
@@ -425,6 +495,49 @@ export async function probeStatus (port, statusPath = '/api/status', timeout = 2
   } catch {
     return null
   }
+}
+
+/**
+ * 探「这个端口上是不是**控制面**」，并把完整状态一起带回来。
+ *
+ * ⚠️⚠️ 为什么不能用 `probeStatus`（2026-10-05 修）：那个探的是 `/api/status`，
+ *    而控制面（8898）和播放面（8899）**都有**这个接口 —— 拿它当健康检查，
+ *    用户在配置里填了播放面端口时照样一路绿灯，可 `/api/friends` `/api/start`
+ *    全是 404：「#营地观战服务」显示运行中、发指令却说拿不到好友列表，无从下手。
+ *    这里改探**控制面独有**的 `/api/rooms`（只读、零营地请求），它通才叫「指挥得动」。
+ *
+ * ⚠️⚠️ **但 `/api/rooms` 的返回体很小**（只有 `ok` / `rooms` / `watchers` / `free`），
+ *    2026-10-05 换探针时把取数也一起换掉了，于是面板上 `status.ffmpeg` 和
+ *    `status.accounts` 全是 `undefined` —— 部署完明明服务端日志写着
+ *    `ffmpeg  /usr/local/bin/ffmpeg`，群里却报「这台机器上没找到 ffmpeg」（2026-10-06 修）。
+ *    `?:` 和 `?? 0` 这两个兜底把「字段不存在」和「真的是 0/false」抹成了同一个样子，
+ *    所以错的不是判断表达式，是**取数的来源**。
+ *
+ *    现在：`/api/rooms` 只当**可用性判据**，拿到之后**再问一次 `/api/status`**
+ *    取那份完整状态（`ffmpeg` / `accounts` 都在里面）。多一次本机回环请求，
+ *    换 `ffmpeg`、`accounts`、`recording` 这些字段不再丢。
+ *
+ * @returns {Promise<object|null>} 控制面可用时返回合并后的状态；不可用返回 null
+ */
+export async function probeControlPort (port, timeout = 2500) {
+  const control = await probeStatus(port, '/api/rooms', timeout)
+  if (!control?.ok) return null
+  // `/api/rooms` 通了 = 这确实是控制面。完整状态去 `/api/status` 拿
+  const full = await probeStatus(port, '/api/status', timeout)
+  // 拿不到完整状态（极罕见：刚好在这一瞬重启）时退回 rooms 的结果，
+  // 至少 `free` 是对的，别把整个探测判成失败
+  return full?.ok ? { ...control, ...full } : control
+}
+
+/** 等控制面起来（pm2 拉起到真正监听之间有几百毫秒的空窗） */
+export async function waitControlPort (port, timeoutMs = 25000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const s = await probeControlPort(port)
+    if (s?.ok) return s
+    await new Promise(resolve => setTimeout(resolve, 500))
+  }
+  return null
 }
 
 /** 等它起来（pm2 拉起到真正监听之间有几百毫秒的空窗） */

@@ -28,6 +28,8 @@ import { readYamlFile, writeYamlFile } from './yamlUtils.js'
 import { quarantineCorrupt } from './safeStore.js'
 import ApiService from './api.js'
 import cache from './cache.js'
+// 批内待落盘队列必须跨热重载共享，否则热重载会吞掉旧实例攒下的 patch（见 utils/hotState.js）
+import { hotBox } from './hotState.js'
 import { archiveBattles } from './battleArchive.js'
 // 营地昵称里常有私有区图标和不可见字符，直接拼进文案会显示成豆腐块或整段空白，
 // 清洗规则和排行榜是同一套，复用 rankStore 的实现。
@@ -155,8 +157,19 @@ export function savePushList (pushList) {
 /**
  * 批内待落盘的 patch。null = 当前不在批里。
  * 见 beginSubBatch / endSubBatch。
+ *
+ * ⚠️ 跨热重载共享（`hotBox`，2026-10-06 修）。这是本轮唯一一处**真数据丢失**的模块级状态：
+ *    `checkOne` 的结构是 `beginSubBatch()` → `await checkOneInner(...)` → `finally endSubBatch()`。
+ *    热重载若正好落在那段 `await` 中间，模块重新求值 → `pendingPatches` 变成新的 `null`；
+ *    等旧实例的 `finally` 跑到 `endSubBatch()` 时，它操作的是**新实例的** `pendingPatches`（null），
+ *    于是 `return 0` —— **旧实例攒下的那一批 patch 直接丢掉**：
+ *    战绩游标、上下线基准、退避计数、开播提示全没写盘。
+ *    退避计数丢了后果最重（注释里写过：漏了就永远停在原地，等于把自适应节流整个关掉，
+ *    每个离线号每轮都真查一次，正是 -30107 的来源）。
+ *
+ * 对照：同文件的 `listCache` 是**纯缓存**，热重载丢它只是重新读一次盘，无害，故不锚。
  */
-let pendingPatches = null
+const S = hotBox('pushStore.pendingPatches', { pendingPatches: null })
 
 /**
  * 开始一个「订阅写批」。
@@ -172,8 +185,8 @@ let pendingPatches = null
  * @returns {boolean} 是否成功开批（false = 已经在批里）
  */
 export function beginSubBatch () {
-  if (pendingPatches) return false
-  pendingPatches = []
+  if (S.pendingPatches) return false
+  S.pendingPatches = []
   return true
 }
 
@@ -182,8 +195,8 @@ export function beginSubBatch () {
  * @returns {number} 实际写入的条数（订阅已被删掉的会跳过，不计入）
  */
 export function endSubBatch () {
-  const patches = pendingPatches
-  pendingPatches = null
+  const patches = S.pendingPatches
+  S.pendingPatches = null
   if (!patches?.length) return 0
   return mergeSubStates(patches)
 }
@@ -203,8 +216,8 @@ export function endSubBatch () {
 export function mergeSubState (qq, patch) {
   const key = String(qq)
   // 在批里：只攒不写，批结束时统一落盘
-  if (pendingPatches) {
-    pendingPatches.push([key, patch])
+  if (S.pendingPatches) {
+    S.pendingPatches.push([key, patch])
     return true
   }
 
@@ -254,6 +267,15 @@ export const REQUEST_INTERVAL = 800
 
 /** 对方隐藏了主页，这类账号永远拿不到战绩，不必重试 */
 const CODE_PROFILE_HIDDEN = -10107
+
+/**
+ * `-30032 用户不存在`：这个营地号在营地侧取不到数据。
+ *
+ * ⚠️ 和 -10107 是**同一件事的两个码**（实测同一时刻 profile 端点回 -10107、
+ *    战绩端点回 -30032），别只管一个 —— 原来漏了它，导致这类号永远在「每轮失败」
+ *    却什么都不报（见 fetchLatest 的注释）。
+ */
+const CODE_USER_NOT_EXIST = -30032
 
 /** fetchLatest 的特殊返回：账号隐藏了战绩 */
 export const FETCH_HIDDEN = Symbol('hidden')
@@ -375,6 +397,14 @@ export function disableSubFlag (qq, key) {
 export function subGroups (sub) {
   const out = []
   const push = value => {
+    // ⚠️ 排除 0 / 非正数：`String(0)` 得 `"0"`，是个**像群号的假值**，
+    //    会让 `if (id)` 成立、往名单里塞一个永远不会存在的群 `"0"`。
+    //    （实测 `subGroups({group:0, groups:[1,2]})` 曾返回 `["0","1","2"]`。）
+    //    后果：send 会对 `"0"` 调 pickGroupSafe 白拿一次群（多一条 warn），
+    //    且 `isJunkSub` 会因为 groups 非空而不判它是空壳订阅。
+    const n = Number(value)
+    if (Number.isFinite(n) && n <= 0) return
+
     const id = String(value ?? '').trim()
     if (id && !out.includes(id)) out.push(id)
   }
@@ -858,7 +888,23 @@ export async function fetchLatest (campId, qq) {
     const res = await ApiService.getMoreBattleList(String(campId), String(qq), { option: 0, lastTime: 0 })
     const code = Number(res?.returnCode || 0)
 
-    if (code === CODE_PROFILE_HIDDEN) return FETCH_HIDDEN
+    /**
+     * ⚠️⚠️ 「这个营地号在营地侧取不到数据」有两个码，**必须都认**（2026-10-05 修）。
+     *
+     * 实测同一时刻：`getProfile` 回 `-10107 隐藏主页`，`getMoreBattleList` 却回
+     * `-30032 用户不存在` —— 两个端点给的码不一样，说的却是同一件事。
+     * 原来这里只判 -10107，于是 -30032 掉进下面的 `code !== 0` → `return null`
+     * （= 当成**临时失败**）→ 轮询每轮照发请求、每轮都失败、**永远不收敛**，
+     * 而且因为 null 被当成「这轮没拿到数据」，订阅表里连个错都看不出来。
+     * 主人实测就撞在这个上：推送用的营地号被隐藏，20 小时一条推送都没有，
+     * 而任何地方都说不出为什么。
+     *
+     * 两个码统一按「拿不到」处理（`FETCH_HIDDEN`），让上层能把这件事记进订阅项、进日志。
+     */
+    if (code === CODE_PROFILE_HIDDEN || code === CODE_USER_NOT_EXIST) {
+      logger.debug(`[王者推送] ${campId} 营地侧取不到数据（${code}: ${res?.returnMsg || ''}）`)
+      return FETCH_HIDDEN
+    }
 
     if (code !== 0) {
       logger.debug(`[王者推送] ${campId} 返回异常码 ${code}: ${res?.returnMsg || ''}`)
@@ -948,7 +994,9 @@ export async function fetchOnlineState (campId, qq) {
     const res = await ApiService.getProfile(String(campId), String(qq))
     const code = Number(res?.returnCode || 0)
 
-    if (code === CODE_PROFILE_HIDDEN) return FETCH_HIDDEN
+    // ⚠️ 和 fetchLatest 同一口径：两个码都表示「这个号在营地侧取不到数据」
+    //    （实测 profile 端点回 -10107、战绩端点回 -30032，是同一件事）
+    if (code === CODE_PROFILE_HIDDEN || code === CODE_USER_NOT_EXIST) return FETCH_HIDDEN
 
     if (code !== 0) return null
 
@@ -1018,6 +1066,32 @@ export function pickNewBattles (list = [], sub = {}) {
 
   // 最新一场就是上次推过的那场，没有新战绩，最常见的情况，直接短路
   if (lastSeq && String(list[0]?.gameSeq || '') === lastSeq) return []
+
+  // ⚠️⚠️ `lastGameTime` 缺失时**不能只靠时间条件**（2026-10-06 修）。
+  //    `toInt('')` 得 0，而 `dtEventTime > 0` 恒真 —— 去重只剩 gameSeq 一条，
+  //    于是只要游标指向的不是最新那场（比如指向中间某场），**整页 30 场**都会被
+  //    当成新战绩推出去（刷屏）。实测：`{lastGameSeq:'1010', lastGameTime:''}`
+  //    → `fresh.length = 30`（期望 10）。
+  //
+  //    缺口来自 `toggleOnline`（只写在线字段、不写战绩游标）和手工编辑存档，
+  //    所以这种记录是可能存在的。时间条件失效时退回**按 seq 定位**：
+  //    找到游标那一场，只取它**之前**（更新）的场次，语义与时间条件一致。
+  const bySeqFallback = () => {
+    if (!lastSeq) return null
+    const idx = list.findIndex(item => String(item?.gameSeq || '') === lastSeq)
+    // 游标那场已经翻出列表了（列表太短）：保守地认为「都是新的」，
+    // 不能返回 [] —— 那会把真新战绩也吞掉，比多推更糟
+    if (idx < 0) return list.slice()
+    return list.slice(0, idx)
+  }
+
+  if (!lastTime) {
+    const fallback = bySeqFallback()
+    // 定位不到游标（lastSeq 为空，但前面已保证 lastSeq/lastTime 至少有一个）
+    // 或列表里没有它时，返回整页是唯一不丢数据的选择
+    if (fallback === null) return list.slice().reverse()
+    return fallback.reverse()
+  }
 
   const fresh = list.filter(item => {
     if (String(item?.gameSeq || '') === lastSeq) return false
@@ -1432,7 +1506,32 @@ export function formatStarChange (session = {}) {
   if (!jobTo || !jobFrom) return null
 
   if (jobFrom !== jobTo) {
-    return { text: `段位 ${jobFrom} → ${jobTo}（${starTo}星）`, icon: '📈', tone: 'up' }
+    // ⚠️⚠️ **必须比大段位层级，不能无条件写 `up`**（2026-10-06 修）。
+    //
+    // 段位名不同只说明「跨了大段」，**方向要另判**。原先这里把 `icon:'📈', tone:'up'`
+    // 写死，于是掉段也报「升」。真实归档全量复算（`BattleArchive.json` 22 个账号）：
+    //   daily 230 窗口 / 12 次段位变化 → 判错 2
+    //   weekly 230 / 47 → **判错 18**（全是掉大段）
+    //   monthly 230 / 75 → **判错 43**
+    // 样本：`绝世王者 → 永恒钻石II`（王者 → 钻石）输出「📈 段位 绝世王者 → 永恒钻石II」。
+    //
+    // 危害不止文案：`reportStore.js` 的 `pickProgress` 拿 `tone === 'up'` 当升段闸门，
+    // 群报的「升段之星」会**颁给掉段的人**（实测 2026-09 月报：`荣耀王者 → 至尊星耀III`
+    // 当选，真正升段的 `至尊星耀II → 最强王者` 落选）；模板按 tone 配色，
+    // 掉段还会渲染成金色喜报色。
+    const bandFrom = rankBand(jobFrom)
+    const bandTo = rankBand(jobTo)
+
+    if (bandTo > bandFrom) {
+      return { text: `段位 ${jobFrom} → ${jobTo}（${starTo}星）`, icon: '📈', tone: 'up' }
+    }
+    if (bandTo < bandFrom && bandTo > 0) {
+      return { text: `段位 ${jobFrom} → ${jobTo}（${starTo}星）`, icon: '📉', tone: 'down' }
+    }
+
+    // 两边层级相同（同名大段的不同写法，如「最强王者」→「荣耀王者」）或认不出来（band 0）：
+    // 方向无法判定，标 flat 让下游别把它当升段。宁可少报一次喜，不能把掉段报成升段
+    return { text: `段位 ${jobFrom} → ${jobTo}（${starTo}星）`, icon: '', tone: 'flat' }
   }
 
   // 同名段但 roleJob 小编号变了（旧体系 5 星一小段）：起止星数不可比，按编号报升降段。
@@ -1678,8 +1777,22 @@ function observeSnapshot (state, data, nowMs, prev = {}) {
   const gaming = data ? Boolean(data.isGaming) : false
   const prevGaming = String(prev?.lastGaming || '') === '1'
 
-  patch.lastGaming = gaming ? '1' : ''
-  patch.lastGamingHero = gaming ? String(data?.gaming?.heroId || '') : ''
+  // ⚠️⚠️ `data` 为 null 有**两种截然不同**的原因，只有其中一种能断言「他不在对局」：
+  //      (a) needBattleList 判否 —— 这轮压根没拉列表 → 玩家确实不在对局，清空是对的；
+  //      (b) 拉了但失败 —— fetchLatest 返回 null（异常码 / 抛错 / 全池频控冷却）
+  //          或 FETCH_HIDDEN → 什么都没观测到，**必须保留上一轮的值**。
+  //    原先这里无条件写空，于是频控/抖动那一轮会被当成「他不在对局」落盘，两个下游立刻误判：
+  //      · apps/whoIsPlaying.js 把他从「正在对局」组挪进「在线」组，英雄格一起变空；
+  //      · apps/gameRecordPush.js 的 hintTick 挑不到他（`lastGaming === '1'` 不成立），
+  //        **开播提示漏发**，失败持续到这一局结束就彻底没了。
+  //    下面的 lastGameEndAt 早就加了 `data &&` 守卫，这里属于同源疏漏（2026-10-06 补）。
+  //    gameOnline 只用来决定「能不能下结论」，不用来判定「在对局」——判定仍只信 isGaming，
+  //    免得又回到「正在对局却没有英雄」那条老路。
+  const canJudgeIdle = Boolean(data) || toInt(state?.gameOnline) !== 2
+  if (canJudgeIdle) {
+    patch.lastGaming = gaming ? '1' : ''
+    patch.lastGamingHero = gaming ? String(data?.gaming?.heroId || '') : ''
+  }
   // 营地给了 isGaming 却没给 heroId：没见过的组合，留一条痕迹方便回查，但不影响出图
   if (gaming && !data?.gaming?.heroId) {
     logger.debug(`[王者推送] ${prev.campId || ''} isGaming=true 但没给 heroId，本轮英雄留空`)
@@ -1698,12 +1811,29 @@ function observeSnapshot (state, data, nowMs, prev = {}) {
   else if (gaming) patch.lastGameEndAt = ''
 
   // 同一局的开始时刻：dtEventTime 一局之内恒定，是「一局」的唯一标识。
-  // 只在开局那一轮（或换了局的轮次）写，避免退避轮拿旧时间戳反复刷新。
+  //
+  // ⚠️⚠️ **只写 `lastGamingStartSnap`，绝不写 `lastGamingStart`**（2026-10-06 修）。
+  //    `lastGamingStart` 是**战绩推送的游标**（`checkBattle` 的 `needGaming` 拿它判
+  //    「这一局提醒过没有」，只在**发送成功**后推进 —— 见那里的注释
+  //    「发送失败时一个游标都不动，下一轮整条消息重试」）。
+  //    而本函数是**纯观测**，两条路（常驻轮询 + `#谁在打游戏` 现刷）共用，
+  //    原先在这里无条件推进游标，等于把「发送失败不推进」这条规矩从背后捅穿：
+  //
+  //      连打排位时「上一局已结算 + 下一局已开局」会在**同一轮**读到
+  //      （checkBattle 的注释自己说明这「几乎总是发生」），此时若 `send` 失败：
+  //        · checkBattle 正确地一个游标都不写
+  //        · 但收尾 `mergeSubState(qq, {...patch})` 把本函数算好的游标合并进去了
+  //        · 下一轮 `pickNewBattles` 见到 `lastGameSeq` 已相等 → 直接短路
+  //        · **那一局战绩永久丢失**，且开局提醒（比的是同一个字段）一起被吞
+  //      实测复现：第 N 轮 `pickNewBattles → [1001]`（正确），
+  //      收尾合并后第 N+1 轮 `→ []`，B1 再也不出现。
+  //
+  //    拆成独立字段后两边各归各的：推送游标由 checkBattle 独占，
+  //    展示/盯梢用 `lastGamingStartSnap`（由本函数每轮照常刷新）。
+  //    `lastGameSeq` 在快照里**干脆不写** —— 没有任何展示方读它，写了只有害处。
   const start = gaming ? String(data?.gaming?.dtEventTime || '') : ''
   if (startingNewGame(start, prev)) {
-    patch.lastGamingStart = start
-    // 换局就把「已经打了多久」的起点也一起换掉，否则会显示成上一局的时长
-    patch.lastGameSeq = String(data?.list?.[0]?.gameSeq || '')
+    patch.lastGamingStartSnap = start
   }
 
   // 段位顺手记一份：#谁在打游戏 要显示段位徽章，而它自己不发请求。
@@ -1726,14 +1856,18 @@ function observeSnapshot (state, data, nowMs, prev = {}) {
  * `dtEventTime` 一局之内恒定，所以它变了就是新的一局；从没记过（历史订阅没这个字段）
  * 也算新的一局，好让第一轮就把起点写上。
  *
+ * ⚠️ 比的是 `lastGamingStartSnap`（**快照专用**字段），不是推送游标 `lastGamingStart` ——
+ *    两者语义不同，见 observeSnapshot 里的说明。历史订阅项两个都没有时也算新局，
+ *    会自然地把 `lastGamingStartSnap` 补上。
+ *
  * @param {string} start 本轮拿到的一局开始时刻（不在对局时是空串）
  * @param {object} prev 上一轮的订阅项
  * @returns {boolean}
  */
 function startingNewGame (start, prev) {
   if (!start) return false
-  // prev.lastGamingStart 可能是数字（早期写法）或字符串，统一成字符串比
-  return String(prev?.lastGamingStart ?? '') !== start
+  // 可能是数字（早期写法）或字符串，统一成字符串比
+  return String(prev?.lastGamingStartSnap ?? '') !== start
 }
 
 /**
@@ -1769,13 +1903,18 @@ export async function collectSnapshot (qq, campId, sub, nowMs = Date.now(), { sn
 
   let state = null
   let onlineSignalMissing = false
+  /**
+   * 营地**明确**说这个号取不到数据（-10107 隐藏主页 / -30032 用户不存在）。
+   * ⚠️ 和「这轮请求失败」是两回事：前者重试一万次也一样，必须让上层知道。
+   */
+  let unavailable = false
   // 本轮 profile 拿到的游戏昵称，独立于 state 存活：营地可能不给在线状态，
   // 但昵称照样给（见下面的分支），所以不能挂在 state 上一起被丢弃
   let roleNameFromState = ''
 
   if (snapshotOn) {
     state = await fetchOnlineState(campId, qq)
-    if (state === FETCH_HIDDEN) state = null
+    if (state === FETCH_HIDDEN) { unavailable = true; state = null }
     // 营地只关了「在线状态」授权的号，三个字段全给 0（判据见 hasOnlineSignal）。
     // 这不是离线而是「没告诉你」，当成没拿到，调用方就不会拿它报上下线、
     // observeSnapshot 也不会把 lastOnlineState 记成 0；战绩那一路照旧走
@@ -1798,11 +1937,25 @@ export async function collectSnapshot (qq, campId, sub, nowMs = Date.now(), { sn
   // 注意传的是 battleOn 而不是 snapshotOn：只采集时不拉战绩列表，
   // profile 里的 gameOnline 已经够填快照了，省下的请求量正好抵掉扩量的开销
   let data = null
+  /**
+   * ⚠️⚠️ 「营地明确说这个号取不到」和「这轮请求失败」必须分开（2026-10-05 修）。
+   *
+   * 原来两条路都只写 `data = null`，上层完全分不出：
+   *   · 临时失败（网络抖动 / 频控）→ 下一轮重试就好
+   *   · 营地明确回 -10107 / -30032 → **重试一万次也一样**，该标注、该让用户知道
+   * 于是主人那个被隐藏的营地号：每轮都发请求、每轮都失败、订阅表里
+   * `lastSeenAt` 一动不动，而**任何地方都说不出为什么**（他 20 小时没收到推送）。
+   *
+   * 所以这里把 -10107/-30032 归一成 `unavailable` 带出去，让上层写进订阅项、
+   * 进日志、能被指令查到。
+   */
+  let fetched = null
   if (needBattleList({ battleOn, onlineOn: snapshotOn, state, sub })) {
     // profile 刚打过，两个端点的请求别贴在一起
     if (snapshotOn) await sleep(REQUEST_INTERVAL)
-    data = await fetchLatest(campId, qq)
-    if (data === FETCH_HIDDEN) data = null
+    fetched = await fetchLatest(campId, qq)
+    if (fetched === FETCH_HIDDEN) { unavailable = true; fetched = null }
+    data = fetched
   }
 
   const patch = {
@@ -1812,8 +1965,13 @@ export async function collectSnapshot (qq, campId, sub, nowMs = Date.now(), { sn
     ...(roleNameFromState ? { roleName: roleNameFromState } : {}),
     // 营地这轮没给在线状态：把可能留着的旧值清成空串，让 #谁在打游戏 归到
     // 「还没采集到状态」而不是谎报离线（空串和真的 '0' 语义不同）
-    ...(onlineSignalMissing ? { lastOnlineState: '' } : {})
+    ...(onlineSignalMissing ? { lastOnlineState: '' } : {}),
+    // ⭐ 把「营地明确说这个号取不到」写进订阅项 —— 这是主人排查
+    //    「我的推送怎么没了」时唯一能看到的东西
+    ...(unavailable
+      ? { lastUnavailableAt: String(nowMs), lastUnavailableReason: `营地号 ${campId} 取不到数据（隐藏主页/用户不存在）` }
+      : {})
   }
 
-  return { state, data, patch }
+  return { state, data, patch, unavailable }
 }

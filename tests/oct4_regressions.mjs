@@ -2,9 +2,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import {fileURLToPath} from 'node:url';
+import {fileURLToPath, pathToFileURL} from 'node:url';
 
 const root = path.resolve(process.argv[2] || path.join(path.dirname(fileURLToPath(import.meta.url)), '../engine/upstream'));
+const hotState = await import(pathToFileURL(path.join(root, 'utils/hotState.js')).href);
 const dependencies = [];
 globalThis.__oct4Dependencies = dependencies;
 globalThis.logger = new Proxy({}, {get: () => () => {}});
@@ -17,7 +18,7 @@ async function load(relative, mocks) {
   source = source.replace(/^import\s+([\s\S]*?)\s+from\s+(['"])([^'"\n]+)\2\s*;?/gm,
     (statement, clause, quote, specifier) => {
       if ((specifier.startsWith('node:') || specifier === 'path') && !(specifier in mocks)) return statement;
-      const index = dependencies.push(mocks[specifier] || fallback) - 1;
+      const index = dependencies.push(mocks[specifier] || (specifier.endsWith('/hotState.js') ? hotState : fallback)) - 1;
       const binding = `globalThis.__oct4Dependencies[${index}]`;
       clause = clause.trim();
       if (clause.startsWith('{')) return `const ${clause.replace(/\s+as\s+/g, ': ')} = ${binding};\n`;
@@ -87,6 +88,7 @@ const {WatchBattle} = await load('apps/watchBattle.js', {
   '#components': components,
   '#utils': {shouldQuote: () => false},
   '../utils/atTarget.js': {AT_HEAD: ''},
+  '../utils/quoted.js': {readQuoted: async () => null},
   '../utils/remoteAccounts.js': {reportRemoteAccounts: async url => {assert.equal(url, base); remoteReports.push(url)}}
 });
 const watch = new WatchBattle();
@@ -130,15 +132,26 @@ await test('malformed service response is unknown, not a nonfriend', async () =>
 });
 await test('sendHint stores all coordinates for every subscribed group and prefers live battle ID', async () => {
   for (const gid of subscription().groups) expectRemember(remember(gid));
-  assert.equal(await game.sendHint('user-1', subscription(), gaming(), 4, {...record(), battleId: 'stale-battle'}), true);
+  // This existing assertion covers the stored-name fallback. Live-name priority
+  // is checked below using the upstream's October 5 behavior.
+  assert.equal(await game.sendHint('user-1', subscription(), gaming(), 4, {...record(), nick: '', battleId: 'stale-battle'}), true);
   assert.equal(delivered.length, 1);
   assert.match(delivered[0].text, /订阅昵称 已经开局 4 分钟/);
 });
 await test('sendHint falls back to record battle ID and normalizes coordinate types', async () => {
   expectRemember(remember('group-a', {watcher: '91', owners: ['91', '92'], roleId: '900'}));
   assert.equal(await game.sendHint('user-1', {...subscription(), groups: ['group-a']}, {}, 4,
-    {...record(), watcher: 91, owners: [91, 92], userId: '1234', roleId: 900}), true);
+    {...record(), nick: '', watcher: 91, owners: [91, 92], userId: '1234', roleId: 900}), true);
 });
+for (const [field, name] of [['nick', '游戏昵称'], ['campNick', '营地昵称']]) {
+  await test(`sendHint prefers current ${field}, persists it, and uses it for remembered coordinates`, async () => {
+    const coord = {...record(), nick: '', [field]: name};
+    for (const gid of subscription().groups) expectRemember(remember(gid, {nick: name}));
+    assert.equal(await game.sendHint('user-1', subscription(), gaming(), 4, coord), true);
+    assert.match(delivered[0].text, new RegExp(`${name} 已经开局 4 分钟`));
+    assert.deepEqual(patches, [{qq: 'user-1', patch: {roleName: name}}]);
+  });
+}
 await test('missing coordinates remain compatible and use the resolved display name', async () => {
   const sub = {...subscription(), roleName: '', groups: ['group-a']};
   expectRemember(remember('group-a', {nick: '群名片', watcher: '', owners: [], userID: 0, roleId: ''}));
@@ -161,7 +174,7 @@ for (const method of ['checkHint', 'hintTick']) {
     latest = {isGaming: true, gaming: gaming()};
   }
   await test(`${method} carries friend coordinates through to persisted hints`, async () => {
-    seed(); expectFriends(friendResponse(record()));
+    seed(); expectFriends(friendResponse({...record(), nick: ''}));
     for (const gid of subscription().groups) expectRemember(remember(gid));
     await run();
     assert.equal(delivered.length, 1);

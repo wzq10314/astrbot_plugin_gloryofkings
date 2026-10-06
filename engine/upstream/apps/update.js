@@ -19,8 +19,12 @@ export class GloryOfKingsUpdate extends plugin {
       name: '王者插件_更新',
       dsc: '调用云崽自带更新模块进行插件更新',
       event: 'message',
-      // 最低优先级：更新是兜底指令，任何具体功能的正则都该先有机会匹配
-      priority: 2000,
+      // 最低优先级：更新是兜底指令，任何具体功能的正则都该先有机会匹配。
+      // ⚠️ 这里原来是 2000 —— 数值上是错的：云崽 priority **从小到大**执行，
+      //    2000 反而排在默认档（5000）插件**前面**，跟注释的「最低优先级」正好相反。
+      //    两条正则都是带「王者/农药」前缀的全锚定串，撞不上别的指令，所以这个误会
+      //    一直没造成实际事故；改成 5010 只是让数值跟原意一致。
+      priority: 5010,
       rule: [
         {
           reg: '^#*(王者|农药)(插件)?(强制)?更新$',
@@ -51,7 +55,11 @@ export class GloryOfKingsUpdate extends plugin {
     updater.e = this.e
     updater.reply = this.reply
 
-    if (updater.getPlugin(PluginName)) {
+    // ⚠️⚠️ `getPlugin` 是 **async**（云崽 / TRSS / JiuLi 三家的 plugins/other|system/update.js
+    //    都是），漏 await 拿到的是 Promise —— 恒为 truthy，这个「插件目录不存在就跳过」的
+    //    守卫直接失效（2026-10-06 修）。同文件 48-50 行的 `up.update()` 写法是对的，
+    //    这里漏了。改完之后返回 false（目录不存在）时安静退出，不再回一句无意义的报错。
+    if (await updater.getPlugin(PluginName)) {
       this.e.reply(await updater.getLog(PluginName))
     }
     return true

@@ -98,21 +98,40 @@ export async function probeAdmin (base, adminSecret) {
   }
 }
 
-/** 列出已签发的接入方。返回 null 表示连不上服务端 */
+/**
+ * 列出已签发的接入方。
+ *
+ * ⚠️⚠️ 必须把「连不上」和「密钥不对」分开报（2026-10-06 修）：原先只有一个 null 出口，
+ *    401/403（管理密钥配错或已被服务端轮换）和真正的网络故障被压成同一句
+ *    「连不上共享库，检查一下地址和网络」—— 地址和网络其实都是好的，主人会一直往
+ *    网络方向排查。同仓库 utils/shareStore.js 的 probeShare 早就对状态码做了区分。
+ *
+ * @returns {Promise<{clients?: object[], error?: string}>}
+ */
 async function listClients (base, adminSecret) {
   try {
     const res = await fetch(`${base}/api/v1/admin/tokens`, {
       headers: { 'X-Admin-Secret': adminSecret },
       signal: AbortSignal.timeout(5000)
     })
-    if (!res.ok) return null
-    return (await res.json()).clients || []
+    if (res.status === 401 || res.status === 403) {
+      return { error: '管理密钥不对（服务端拒绝了这次请求）\n发 #营地共享库管理密钥 <密钥> 重设一次' }
+    }
+    if (!res.ok) return { error: `共享库返回了 ${res.status}，稍后再试` }
+    return { clients: (await res.json()).clients || [] }
   } catch {
-    return null
+    return { error: '连不上共享库，检查一下地址和网络' }
   }
 }
 
-/** 吊销一个接入方。返回 false 表示没这个 id 或者连不上 */
+/**
+ * 吊销一个接入方。
+ *
+ * ⚠️ 同 listClients：返回 { ok, error } 而不是裸布尔，免得「密钥错」被说成「没找到该接入方」
+ *    （那会让主人以为这个接入方本来就不存在，转头去重发令牌）。
+ *
+ * @returns {Promise<{ok: boolean, error?: string}>}
+ */
 async function revokeClient (base, adminSecret, id) {
   try {
     const res = await fetch(`${base}/api/v1/admin/tokens/${id}`, {
@@ -120,9 +139,14 @@ async function revokeClient (base, adminSecret, id) {
       headers: { 'X-Admin-Secret': adminSecret },
       signal: AbortSignal.timeout(5000)
     })
-    return res.ok
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, error: '管理密钥不对（服务端拒绝了这次请求）\n发 #营地共享库管理密钥 <密钥> 重设一次' }
+    }
+    if (res.status === 404) return { ok: false }
+    if (!res.ok) return { ok: false, error: `共享库返回了 ${res.status}，稍后再试` }
+    return { ok: true }
   } catch {
-    return false
+    return { ok: false, error: '连不上共享库，检查一下地址和网络' }
   }
 }
 
@@ -331,9 +355,9 @@ export class ShareDeploy extends plugin {
       )
     }
 
-    const list = await listClients(server.base, server.adminSecret)
-    if (list === null) {
-      return e.reply('连不上共享库，检查一下地址和网络', shouldQuote())
+    const { clients: list, error } = await listClients(server.base, server.adminSecret)
+    if (error) {
+      return e.reply(error, shouldQuote())
     }
 
     const active = list.filter(row => row.enabled).length
@@ -356,8 +380,22 @@ export class ShareDeploy extends plugin {
     return e.reply(lines.join('\n'), shouldQuote())
   }
 
-  /** 吊销。对方那边的机器人再请求会直接连不上（403） */  async revoke (e) {
-    const id = Number(e.msg.match(/^#营地共享库吊销\s*(\d+)$/)?.[1])
+  /** 吊销。对方那边的机器人再请求会直接连不上（403） */
+  async revoke (e) {
+    // ⚠️⚠️ 这里的正则必须和 `rule` 里那条**逐字一致**（2026-10-06 修）。
+    //    rule 是 `^#营地共享库?吊销\s*(\d+)$`（`库` 可选），而这里原来写的是
+    //    `^#营地共享库吊销\s*(\d+)$`（`库` 必填）—— 于是用户少打一个「库」字时：
+    //      · rule 放行（`库?` 匹配空）→ 真的进了这个函数
+    //      · 这里匹配不上 → `?.[1]` 是 undefined → `Number(undefined)` = **NaN**
+    //      · 请求打到 `DELETE .../api/v1/admin/tokens/NaN`
+    //    实测：`#营地共享吊销 3` 与 `#营地共享吊销3` 都取到 id=NaN，
+    //    而 `#营地共享库吊销 3` / `#营地共享库吊销3` 取到 3（正常）。
+    //    后果是「删不掉想删的令牌 + 打无效请求」，不会误删别人（服务端找不到 NaN）。
+    //    所以正则带上 `库?`，并显式挡住非整数（防御：将来 rule 再改也不会漏出 NaN）。
+    const id = Number(e.msg.match(/^#营地共享库?吊销\s*(\d+)$/)?.[1])
+    if (!Number.isInteger(id)) {
+      return e.reply('请写明要吊销的序号，例如：#营地共享库吊销 3', shouldQuote())
+    }
 
     const server = this.readServerEnv()
     if (!server) {
@@ -368,9 +406,12 @@ export class ShareDeploy extends plugin {
       )
     }
 
-    const ok = await revokeClient(server.base, server.adminSecret, id)
-    if (!ok) {
-      return e.reply(`没找到 ${id} 号接入方，发 #营地共享库接入方 看看列表`, shouldQuote())
+    const revoked = await revokeClient(server.base, server.adminSecret, id)
+    if (!revoked.ok) {
+      return e.reply(
+        revoked.error || `没找到 ${id} 号接入方，发 #营地共享库接入方 看看列表`,
+        shouldQuote()
+      )
     }
 
     logger.mark(`[${PluginName}] 已吊销共享库接入方 #${id}`)

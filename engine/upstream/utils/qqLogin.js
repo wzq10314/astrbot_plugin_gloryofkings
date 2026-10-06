@@ -30,6 +30,13 @@ const QR_WAIT_TIMEOUT_MS = 60 * 1000
 const SCAN_TIMEOUT_MS = 3 * 60 * 1000
 
 /**
+ * 登录接口的 fetch 超时。这两个请求（ysdk 换三件套、营地 /user/login）不带
+ * AbortSignal：对端一旦「连得上但一直不回包」，await 会永远挂起，「登录任务进行中」
+ * 就再也解不开（api.js 的 REQUEST_TIMEOUT_MS 处理的是同一类坑，这个是登录链路版）。
+ */
+const REQUEST_TIMEOUT_MS = 15000
+
+/**
  * 取宿主渲染器。
  * ⚠️ 必须返回 null 而不是空对象 —— `lib/renderer/loader.js` 的 getRenderer() 在
  * 「配置的渲染后端不是 puppeteer」时返回 `{}`，直接拿它会在 browserInit 上炸成
@@ -130,7 +137,8 @@ async function exchangeCodeForTokens(code) {
       'Auth-Secret-Digest': digest,
       'Auth-Request-Time': timestamp
     },
-    body
+    body,
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
   })
   const result = await response.json().catch(() => null)
 
@@ -190,7 +198,8 @@ async function loginCampByOpenSdk(tokens) {
       'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
       'x-log-uid': crypto.randomUUID().toUpperCase()
     },
-    body: form.toString()
+    body: form.toString(),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
   })
 
   const data = await response.json().catch(() => null)
@@ -274,7 +283,24 @@ export async function createQQLoginSession(e) {
   }
   const { browser, owned: ownBrowser } = acquired
 
-  const page = await browser.newPage()
+  // ⚠️ newPage 必须纳入 owned 浏览器的清理范围（2026-10-06 修）：下面的 close() 是唯一的
+  //    清理入口，而它只在 314 行开始的 try/catch 里被调用；newPage 在这个 try 之外，
+  //    一旦它抛错（浏览器刚起来就崩、连接断开、进程数不足），异常直接冒泡出去，
+  //    close() 永远不执行 —— 而 ownBrowser 为 true 时（配置的渲染后端不是 puppeteer，
+  //    resolveRenderer 返回 null → acquireBrowser 走 launchOwnBrowser）每次重试都会漏一个
+  //    chromium 进程，吃满内存。第 305 行的注释正是要防这个。
+  let page
+  try {
+    page = await browser.newPage()
+  } catch (error) {
+    if (ownBrowser) {
+      try {
+        await browser.close()
+      } catch {}
+    }
+    logger.error(`[营地QQ登录] 创建页面失败: ${error.message}`)
+    throw error
+  }
   let closed = false
   let codeValue = ''
   let codeResolve = null

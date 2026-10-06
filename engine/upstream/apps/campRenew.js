@@ -48,6 +48,22 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 const nameOf = acc => `${acc.userId}${acc.userName ? `（${acc.userName}）` : ''}`
 
+/**
+ * 互斥锁锚在 `globalThis` 上，不用实例私有字段。
+ *
+ * 原因同 `apps/campIm.js` 的 pollState：JiuLi 热重载会给 `plugins/` 下每个模块追加
+ * `?jiuli_reload=<代数>` 重新求值整张模块图，`#renewRunning` 是**实例私有字段**，
+ * 跨模块代次完全独立 —— 老代次那个已经在跑的 `#renewOnce` 不会被新代次的锁挡住。
+ * 一轮保活 30 秒起（2N+2 次请求 × 1.5s 间隔），窗口不算短，重叠了就把营地请求量翻倍。
+ *
+ * ⚠️ 说明：2026-10-05 排查过的「两条保活 MARK 只差 116ms」**不是**这个问题 ——
+ *    复核（2026-10-06）确认那两行之间夹着 45 次进程启动，属于不同的 JiuLi 进程，
+ *    原注释「不同日志文件里同一时刻的行」的判断是对的。这里纯属把锁的作用域
+ *    跟 pollState 对齐，不宣称修掉了那次现象。
+ */
+const RENEW_LOCK_KEY = '__gokCampRenewLock'
+const renewLock = (globalThis[RENEW_LOCK_KEY] ||= { running: false })
+
 export class CampRenew extends plugin {
   constructor () {
     super({
@@ -73,18 +89,46 @@ export class CampRenew extends plugin {
 
   /** 指令入口：`#营地续期` —— 立刻保活一遍，顺手把失效的 QQ 号救回来 */
   async renewNow (e) {
+    // ⚠️ 先测锁再回话：上一轮还在跑时直接交给 renew 回「还在跑」，
+    //    不能先回「正在保活」又改口「还在跑」，两条回复自相矛盾
+    if (renewLock.running) {
+      return await this.renew({ e })
+    }
     await e.reply('正在保活（每个号戳一下，顺便抢救失效的 QQ 号）…', shouldQuote())
     return await this.renew({ e })
   }
 
   /**
-   * 保活的正体。
+   * 统一入口（定时任务和指令都走这里）：先查互斥锁，再把活交给 #renewOnce。
+   * 上一轮没跑完这一轮直接跳过 —— 并发跑的代价见 renewLock 的注释。
    *
    * @param {object}  [opts]
    * @param {object}  [opts.e]      有就是指令触发的（结果回群里），没有就是定时任务（私聊主人）
    * @param {boolean} [opts.silent] 定时模式下**一切正常就不打扰主人**（有事才说话）
    */
-  async renew ({ e = null, silent = false } = {}) {
+  async renew (opts = {}) {
+    if (renewLock.running) {
+      logger.warn(`[${PluginName}] 上一轮营地保活还没跑完，本轮跳过`)
+      // 手动触发时回一句，免得主人以为指令没生效；定时任务重叠就只在日志里留痕
+      if (opts.e) await opts.e.reply('上一轮保活/续期还在跑，等它结束再试', shouldQuote())
+      return
+    }
+
+    renewLock.running = true
+    try {
+      return await this.#renewOnce(opts)
+    } finally {
+      renewLock.running = false
+    }
+  }
+
+  /** 卸载 / 热重载时释放锁，避免老代次卡住导致新代次永远跳过（框架 loader.js 会调） */
+  async onUnload () {
+    renewLock.running = false
+  }
+
+  /** 保活的正体（参数见 renew）。只在 renew 的互斥锁里调用，别直接调。 */
+  async #renewOnce ({ e = null, silent = false } = {}) {
     let before = []
     try {
       before = authStore.listAccounts() || []
@@ -99,9 +143,14 @@ export class CampRenew extends plugin {
 
     // ① 保活：戳 2N+2 次，轮转自然覆盖到每个号
     //
-    // ⚠️ 为什么不是「戳 N 次就够」：轮转游标**一次请求推进 2 格**
-    //    （`authStore.getAuthCandidates` 里转一次、`api.js` 的 `#getAuthCandidates` 又转一次），
-    //    所以 N 次只能覆盖 N/2 个号。2N+2 次保证每个号至少轮到一次。
+    // ⚠️ 实测口径（2026-10-06 复核后订正了原先那句「一次推进 2 格」）：
+    //    轮转只发生在**一处** —— `utils/api.js` 的 `#rotateGlobals`（:1268），
+    //    每次 `#auth.candidates()`（即每次请求）游标 `+1`（`this.#globalCursor += 1`）。
+    //    `utils/authStore.js` 的 `getAuthCandidates`（:826）**刻意不轮转**（那里 :858 有明确说明），
+    //    所以「一次请求推进 2 格」的说法是错的 —— 每次请求只推进 1 格。
+    //    那么 N 次就足以覆盖 N 个号，`2N+2` 是**超额覆盖**（多戳一轮），
+    //    不算 bug、也不打算改：多戳几次没副作用，而账号增删/优先级变化时余量更稳。
+    //    （`authStore.#rotateGlobals` / `#globalCursor` 是死代码，本类里没有调用点。）
     // ⚠️ 别改用 `lastSuccessAt` 来判断「谁被戳到了」——它不是每次成功请求都写（只在
     //    authStore 的登录成功路径写），拿它当覆盖率指标会误判（踩过）。
     const times = before.length * 2 + 2
@@ -128,11 +177,23 @@ export class CampRenew extends plugin {
     const deadQqFailed = []
 
     for (const acc of dead) {
-      const isQQ = String(acc.loginPlatform) === 'qq'
-      const hasTokens = acc.accessToken && (acc.appOpenid || acc.openId)
-      if (!isQQ || !hasTokens) {
-        if (String(acc.loginPlatform) === 'wechat') deadWx.push(nameOf(acc))
-        else deadQqFailed.push(`${nameOf(acc)}（没有三件套，救不了）`)
+      // ⚠️ 拆开判断（2026-10-06 修）：原先 `!isQQ || !hasTokens` 把「平台不是 qq」和
+      //    「三件套不齐」合并成一条，于是 loginPlatform 缺失（手工补录 / 锅巴导入 / 早期版本
+      //    写进去的空值）的失效 QQ 号既不尝试重登，又被报成「没有三件套，救不了」——
+      //    把主人往错误方向带。
+      const platform = String(acc.loginPlatform || '')
+      const hasTokens = Boolean(acc.accessToken && (acc.appOpenid || acc.openId))
+
+      if (platform === 'wechat') {
+        deadWx.push(nameOf(acc))
+        continue
+      }
+      if (platform !== 'qq') {
+        deadQqFailed.push(`${nameOf(acc)}（平台未知：${platform || '空'}，没按 QQ 重登）`)
+        continue
+      }
+      if (!hasTokens) {
+        deadQqFailed.push(`${nameOf(acc)}（没有三件套，救不了）`)
         continue
       }
       try {

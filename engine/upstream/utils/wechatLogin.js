@@ -42,6 +42,13 @@ const QRCODE_TTL_MS = 3 * 60 * 1000
 /** 轮询间隔：2 秒一次 */
 const POLL_INTERVAL_MS = 2000
 
+/**
+ * 每一次机房请求的 fetch 超时。fetchJson 是全链路唯一的发请求入口
+ * （取 ticket / 出码 / 轮询 / 换号都过它），不带表的话任一处「连得上但一直不回包」
+ * 都会让 await 永远挂起，「登录任务进行中」再也解不开（同 qqLogin.js 的考虑）。
+ */
+const REQUEST_TIMEOUT_MS = 15000
+
 /** 设备指纹里的占位 MAC / 内存（照抄抓包结果，营地不看真值只看格式） */
 const DEVICE_MAC_PLACEHOLDER = '02:00:00:00:00:00'
 const DEVICE_MEM_BYTES = 12 * 1024 * 1024 * 1024
@@ -228,11 +235,24 @@ export function buildSpecialEncodeParam (publicKey = CAMP_PUBLIC_KEY) {
 
 /** 统一发请求并返回 { ok, status, headers, json, text }，json 解析失败时退回 { raw } */
 async function fetchJson (url, { method = 'GET', headers = {}, body = null } = {}) {
-  const response = await fetch(url, {
-    method,
-    headers,
-    body
-  })
+  let response
+  try {
+    response = await fetch(url, {
+      method,
+      headers,
+      body,
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+    })
+  } catch (error) {
+    // ⚠️ 超时表到期时 fetch 抛的是 DOMException（AbortError/TimeoutError），
+    //    message 是英文原文（'The operation was aborted.'），顺着调用链原样冒到
+    //    群回复里没法看。归一成中文，err.code（ABORT_ERR=20 / TIMEOUT_ERR=23）
+    //    留在文案里方便排查；其它网络错误（DNS、RST 之类）保持原样不动。
+    if (error?.name === 'AbortError' || error?.name === 'TimeoutError') {
+      throw new Error(`营地接口无响应，请稍后重试（${error.name}, code=${error.code}）`)
+    }
+    throw error
+  }
   const text = await response.text()
   let json = null
 
@@ -251,6 +271,14 @@ async function fetchJson (url, { method = 'GET', headers = {}, body = null } = {
   }
 }
 
+/**
+ * 把服务端响应体压成一行短文本，**只用于日志**。
+ * 直接把它拼进用户可见的错误消息会刷屏，也可能带出内部报文。
+ */
+function brief (text) {
+  return String(text || '').replace(/\s+/g, ' ').slice(0, 200)
+}
+
 /** 取微信扫码用的 SDK ticket，后面出码要用它签名 */
 async function fetchWxSdkTicket (xLogUid) {
   const result = await fetchJson(`${CAMP_API_BASE}/a/getwxsdkticket`, {
@@ -262,7 +290,13 @@ async function fetchWxSdkTicket (xLogUid) {
   })
 
   if (!result.ok || result.json?.returnCode !== 0 || !result.json?.data?.sdkTicket) {
-    throw new Error(`获取登录 SDK Ticket 失败: ${result.text}`)
+    // ⚠️ 不能把**未截断的完整响应体**拼进 error.message（2026-10-06 修）：调用方
+    //    apps/accountManager.js 的 qrFailReply 会把 error.message 原样 e.reply 到群里，
+    //    营地网关回 HTML 错误页 / 带内部字段的 JSON 时，整段报文就进群了（刷屏 + 风控风险
+    //    + 把服务端内部报文暴露给普通群友）。完整响应体只进日志，与 utils/dependency.js
+    //    的 redact(...).slice(-500) 同一口径。
+    logger.warn(`[营地登录] 获取 SDK Ticket 异常（HTTP ${result.status}）：${brief(result.text)}`)
+    throw new Error(`获取登录 SDK Ticket 失败（HTTP ${result.status}），稍后再试`)
   }
 
   return result.json.data.sdkTicket
@@ -291,7 +325,8 @@ async function fetchWechatQrCode (ticket) {
   const uuid = result.json?.uuid
 
   if (!result.ok || result.json?.errcode !== 0 || !qrcodeBase64 || !uuid) {
-    throw new Error(`获取登录二维码失败: ${result.text}`)
+    logger.warn(`[营地登录] 获取二维码异常（HTTP ${result.status}）：${brief(result.text)}`)
+    throw new Error(`获取登录二维码失败（HTTP ${result.status}），稍后再试`)
   }
 
   return {
@@ -341,7 +376,8 @@ async function loginWithWechatAuthCode (code, xLogUid, publicKey = CAMP_PUBLIC_K
   })
 
   if (!result.ok || result.json?.returnCode !== 0 || !result.json?.data?.userId || !result.json?.data?.token) {
-    throw new Error(`营地登录失败: ${result.text}`)
+    logger.warn(`[营地登录] 登录接口返回异常（HTTP ${result.status}）：${brief(result.text)}`)
+    throw new Error(`营地登录失败（HTTP ${result.status}），稍后再试`)
   }
 
   return result.json

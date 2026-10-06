@@ -1,7 +1,7 @@
 // 皮肤墙功能：营地皮肤列表接口调用逻辑参考自 https://github.com/KimigaiiWuyi/WzryUID
 import puppeteer from '../../../lib/puppeteer/puppeteer.js'
 import common from '../../../lib/common/common.js'
-import { getImgType, ApiService, readYamlFile, getLocalImage, getUserAvatar, getPvpSkinCover, Button, AT_HEAD, stripAtText, resolveTargetUserId, resolveUserData, shouldQuote, resolveMemberName, isQQNumber, SZ_ORDER, tierRank, pickTierText, QUALITY_STATS, countQuality, cleanImageCache, resolveCacheMaxBytes } from '#utils'
+import { getImgType, ApiService, readYamlFile, getLocalImage, getUserAvatar, getPvpSkinCover, Button, AT_HEAD, stripAtText, resolveTargetUserId, resolveUserData, shouldQuote, resolveMemberName, isQQNumber, SZ_ORDER, normalizeSzClass, tierRank, pickTierText, QUALITY_STATS, countQuality, cleanImageCache, resolveCacheMaxBytes } from '#utils'
 import path from 'path'
 import { PluginData } from '#components'
 
@@ -181,12 +181,17 @@ export class SkinWall extends plugin {
       if (!('iBuy' in skin) || skin.szClass == null) {
         continue
       }
-      const szClass = String(skin.szClass).replace('＋', '+')
+      // ⚠️ 必须走 normalizeSzClass：营地真实返回里有 `" A"`（前导空格）这种写法，
+      //    原先只 replace('＋','+')、不 trim，`" A"` 匹配不上 SZ_ORDER → 落到末档（=D），
+      //    实测「径山谋武(孙权)」从 33/62 掉到 62/62。见 utils/skinCatalog.js 的说明。
+      const szClass = normalizeSzClass(skin.szClass)
       const conf = confList[skin.skinId]
       if (!conf) {
         continue
       }
-      const szLevel = SZ_ORDER.includes(szClass) ? SZ_ORDER.indexOf(szClass) : 7
+      // 未命中时排到**所有已知评级之后**（用 SZ_ORDER.length，不是写死的 7 ——
+      // SZ_ORDER 加过 SSR/SP 之后长度变了，写死会撞进 D 档的位置）
+      const szLevel = SZ_ORDER.includes(szClass) ? SZ_ORDER.indexOf(szClass) : SZ_ORDER.length
       countQuality(conf.classTypeName, qualityCounters)
 
       // 综合价值(真实估值)与点券原价分开保存，避免两种量纲混在一起比大小
@@ -357,6 +362,10 @@ export class SkinWall extends plugin {
     // 单页直接发图
     if (totalPages === 1) {
       const img = await puppeteer.screenshot('SkinWall', buildParams(pages[0], 0))
+      // ⚠️ 判空（2026-10-06 修）：screenshot 渲染失败是**返回 false** 不抛错，
+      //    不拦的话适配器把非对象元素包成文本段（OneBotv11.js:60），群里收到一条 `false`。
+      //    下面多页分支本来就有 `if (img)`，单页这条早返回漏了。
+      if (!img) return e.reply('皮肤图渲染失败，请稍后再试', shouldQuote())
       await e.reply([img, Button.skinWall(ID)], shouldQuote())
       return
     }

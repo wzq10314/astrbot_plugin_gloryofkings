@@ -26,7 +26,9 @@
  *    （认不出是我们的目录）→ 拒绝，让主人自己确认。
  */
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
+import { spawnSync } from 'node:child_process'
 import { PluginPath, PluginName, Config } from '#components'
 import { shouldQuote } from '#utils'
 import { pm2, pm2Proc, resetPm2Cache, isOurProcess, pm2ForeignProc, launcherInfo } from '../utils/pm2.js'
@@ -36,6 +38,7 @@ import {
 } from '../utils/deploy.js'
 import { ensureDependencies } from '../utils/dependency.js'
 import { probeRemoteStatus, reportRemoteAccounts } from '../utils/remoteAccounts.js'
+import { fillDefaultShareUrl, migrateLegacyShareToken } from '../utils/shareDefaults.js'
 
 /** 云崽根目录（插件住在 `<根>/plugins/<名字>`，往上两级）—— 只为把路径显示得短一点 */
 const YunzaiRoot = path.resolve(PluginPath, '../..')
@@ -91,10 +94,63 @@ function distConfig () {
   }
 }
 
-/** 服务端在哪个端口：从配置的服务地址里抠，抠不到按默认 */
+/**
+ * 服务端在哪个端口：从配置的服务地址里解析，解析不出来按默认。
+ * ⚠️ 与 watchDeploy 同源：`/: (\d+)/` 会把 IPv6 回环地址 `http://[::1]:8900` 抠成 1，
+ *    再经 imEnv 注入给 pm2，配置与监听端口就彻底掰开了（2026-10-06 修）。
+ */
 function serverPort () {
-  const m = String(cfg().campImApiUrl || '').match(/:(\d+)/)
-  return m ? Number(m[1]) : DEFAULT_PORT
+  const raw = String(cfg().campImApiUrl || '').trim()
+  if (raw) {
+    try {
+      const port = Number(new URL(/^[a-z]+:\/\//i.test(raw) ? raw : `http://${raw}`).port)
+      if (port >= 1 && port <= 65535) return port
+    } catch {}
+  }
+  return DEFAULT_PORT
+}
+
+/**
+ * 起服务端时注入的环境变量。
+ *
+ * ⚠️⚠️ **监听端口必须跟着配置一起注入**（2026-10-06 修）：服务端的监听端口来自
+ *    `process.env.GOK_IM_PORT`（默认 8900），而 `serverPort()` 抠出来的自定义端口
+ *    原先只影响**插件去哪探测**、不影响**服务端在哪监听**。于是 `campImApiUrl`
+ *    一旦不是 8900：服务端仍起在 8900，`waitStatus` 去探自定义端口必然超时，
+ *    部署报「进程起了但状态接口没通」，而进程其实好端端在跑 —— 报错文案还把用户
+ *    指向错误方向。同仓库的 apps/watchDeploy.js 早就修过一模一样的坑（见 watchEnv）。
+ */
+function imEnv () {
+  return { GOK_IM_PORT: String(serverPort()) }
+}
+
+/**
+ * 「pm2 save 了、机器一重启服务却没起来」的兜底检查。
+ *
+ * `pm2 save` 只是把进程写进 dump，机器重启时要靠 systemd 里的 `pm2-<user>` 服务
+ * 去 resurrect —— 那个服务是 `pm2 startup` 打出来的命令装的，没装的话 save 也白搭。
+ * 这里不能替主人跑（要 sudo、提示语还随发行版变），查出来没 enabled 就打 warning 指条路。
+ * Windows（lpm2）没有 systemd 这一层，直接跳过。
+ */
+function warnIfStartupDisabled (procName) {
+  if (process.platform === 'win32') return
+  try {
+    // ⚠️ 口径与 watchDeploy 对齐，且不能写成 `state && state !== 'enabled'`（2026-10-06 修）：
+    //    ① `os.userInfo().username` 是**当前进程**的 OS 用户名，而 `pm2-<user>` 这个 systemd
+    //       单元属于当初跑 `pm2 startup` 的那个用户，云崽被 systemd / sudo 拉起时两者可以不同；
+    //    ② `systemctl is-enabled` 对**压根没装过的单元**是「stdout 空、错误进 stderr、退出码非 0」，
+    //       此时 `state` 是空串 → 条件为假 → 而「压根没装 pm2 startup」恰恰是最常见、最需要提醒的一种。
+    const user = String(process.env.USER || process.env.LOGNAME || 'root')
+    const r = spawnSync('systemctl', ['is-enabled', `pm2-${user}`], { encoding: 'utf-8', timeout: 10000 })
+    const state = String(r.stdout || '').trim()
+    if (state !== 'enabled') {
+      const detail = state || String(r.stderr || '').trim() || '查不到这个单元'
+      logger.warn(
+        `[${PluginName}] pm2-${user} 服务状态是 ${detail}，机器重启后 ${procName} 不会自己起来。` +
+        '在机器人所在设备执行一次：pm2 startup（按提示再跑它打出来的那条 sudo 命令）'
+      )
+    }
+  } catch {}
 }
 
 /* ------------------------------------------------------------ 插件 */
@@ -154,6 +210,10 @@ export class CampImDeploy extends plugin {
 
     Config.modify('config', 'distUrl', url)
     Config.modify('config', 'distToken', token)
+    // ⭐ 同 apps/watchDeploy.js：令牌三套共用，接入即补上共享库地址，
+    //    并把老配置里的 `shareToken` 搬进面板认的 `distToken`
+    fillDefaultShareUrl()
+    migrateLegacyShareToken()
     logger.mark(`[${PluginName}] 已接入分发服务：${url}`)
 
     return this.deploy(e, { adopted: true })
@@ -307,13 +367,13 @@ export class CampImDeploy extends plugin {
       if (!nodeDependencies.ok) throw new Error(nodeDependencies.messages.join('；'))
 
       const startup = restarting
-        ? pm2(['restart', PROC_NAME, '--update-env'], { timeout: 60000 })
+        ? pm2(['restart', PROC_NAME, '--update-env'], { timeout: 60000, env: imEnv() })
         : pm2([
             'start', ENTRY_FILE,
             '--name', PROC_NAME,
             '--interpreter', 'node',
             '--cwd', SERVER_DIR
-          ], { timeout: 60000 })
+          ], { timeout: 60000, env: imEnv() })
 
       if (!startup.ok) {
         throw new Error(`pm2 ${restarting ? '重启' : '启动'}失败：${startup.err || startup.out || '未知原因'}`)
@@ -321,6 +381,8 @@ export class CampImDeploy extends plugin {
 
       const saved = pm2(['save'], { timeout: 30000 })
       if (!saved.ok) logger.warn(`[${PluginName}] pm2 save 失败，开机自启可能没生效：${saved.err || saved.out}`)
+      // save 只写 dump，机器重启还得靠 pm2-<user> 的 systemd 服务 resurrect —— 没装就提醒
+      warnIfStartupDisabled(PROC_NAME)
 
       const port = serverPort()
       const status = await waitStatus(port)
@@ -405,7 +467,13 @@ export class CampImDeploy extends plugin {
       const clients = status.clients || []
       const online = clients.filter(c => c.state === 'online').length
       lines.push(`账号：${online}/${clients.length} 在线`)
-      if (status.queue) lines.push(`待处理：${status.queue.lastId || 0} 条`)
+      // ⚠️ 待处理条数用 `queue.length`，**不是** `queue.lastId`。
+      //    lastId 是服务端的消息序号（从毫秒时间戳起步、每条 ++），跟条数不是一个量纲：
+      //    实测队列空着时 lastId 是 1791220064781，照它显示就是「有 1.7 万亿条待处理」。
+      //    apps/campIm.js 的面板早就改用 queue.length 了（那里注释记过这个坑），
+      //    这条是同一处逻辑的另一份拷贝，漏改了 —— 两处必须保持一致。
+      const pending = Number(status.queue?.length || 0)
+      if (pending > 0) lines.push(`待处理：${pending} 条`)
     }
 
     return e.reply(lines, shouldQuote())

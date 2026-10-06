@@ -95,7 +95,8 @@ export function buildMasterPanelData () {
         items: [
           { command: '#王者设置', desc: '查看本面板与链路状态' },
           { command: '#王者用户统计', desc: '精简版绑定情况统计' },
-          { command: '#清理失效营地账号', desc: '移除无法使用的登录态' }
+          { command: '#清理失效营地账号', desc: '移除无法使用的登录态' },
+          { command: '#隐藏主页名单 / #清除隐藏主页', desc: '隐藏主页的号' }
         ]
       },
       {
@@ -125,5 +126,7 @@ export async function renderMasterPanel (e) {
     ...buildMasterPanelData()
   })
 
-  await e.reply(panelImage)
+  // ⚠️ screenshot 失败返回 false 而不抛错（2026-10-06 修）：不判空会把 false 当文本段
+  //    发给主人，而「面板出图失败」正是最该给一句人话的时候（主人只会看到一条 false）。
+  if (!panelImage) return e.reply('面板出图失败，稍后再试')
 }

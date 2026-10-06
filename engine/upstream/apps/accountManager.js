@@ -65,8 +65,17 @@ const QR_TIMEOUT_HINT = '营地登录等待超时，请重新发起'
 /** 两条扫码登录共用的后半段引导（只有开头那句要不要点明「手机 QQ」不一样） */
 const SCAN_LOGIN_TAIL = '\n登录成功后会自动保存登录态并绑定这个营地号，发 #营地观战 就能看你营地好友里谁在打。'
 
-/** 进行中的扫码登录任务：botUserId → { taskId, qrMessageId, ... }。只活在进程内存里 */
-const pendingWechatLoginMap = new Map()
+/**
+ * 进行中的扫码登录任务：botUserId → { taskId, qrMessageId, ... }。只活在进程内存里。
+ *
+ * ⚠️⚠️ 必须锚在 `globalThis` 上（2026-10-06 修）：它同时是「同一人别重复发起」的并发锁
+ *    （见 #beginScanLogin 的 `#pendingLogin(botUserId)` 判据），而 JiuLi 的热重载会给
+ *    plugins/ 下每个模块追加 `?jiuli_reload=<代数>` 重新求值（见 utils/hotState.js）——
+ *    模块级 Map 每代都变成新的空 Map，锁被架空：同一个人可以再发一条指令、两个扫码
+ *    登录并行，各自往同一个人身上 upsert 账号，用户看到的回执与最终生效的号可能不是同一个。
+ *    同仓的 campRenew / campIm / watchBattle / pushStore 都按这个约定锚了 globalThis。
+ */
+const pendingWechatLoginMap = (globalThis.__gokPendingWechatLoginMap ||= new Map())
 
 export class AccountManager extends plugin {
   // ══════════════════════════ 指令注册 ══════════════════════════
@@ -143,11 +152,16 @@ export class AccountManager extends plugin {
     const filePath = path.join(PluginData, USER_DATA_FILE)
     const userData = readYamlFile(filePath) || {}
 
-    if (!userData[userId]) {
-      userData[userId] = {
-        ids: [],
-        current: 0
-      }
+    // ⚠️ 判据是「条目存在**且 ids 是数组**」，不是「条目存在」（2026-10-06 修）。
+    //    空对象 `{}` 是 truthy，`!userData[userId]` 为 false → 不补默认值 →
+    //    紧接着 `userData[userId].ids.length` 抛 TypeError。
+    //    触发面：手改 YAML、备份还原、旧版本写坏（`{}` / `{current:0}` / `{ids:null}`）。
+    //    实测三种脏形态都抛 `Cannot read properties of undefined/null (reading 'length')`，
+    //    而完全没这个键的新用户反而正常（走补默认值那条）。
+    //    `authStore.bindCampUserId` 早就是这么写的，这里对齐它的口径。
+    const entry = userData[userId]
+    if (!entry || !Array.isArray(entry.ids)) {
+      userData[userId] = { ...(entry || {}), ids: [], current: 0 }
     }
 
     return { userData, filePath }
@@ -198,10 +212,29 @@ export class AccountManager extends plugin {
     const userId = await this.#resolveReplyUserId(e)
     if (!userId) return null
 
-    const index = parseInt(stripAtText(e.msg).replace(prefixRe, '')) - 1
+    // ⚠️⚠️ 序号必须**先判是不是整数**，再拿去算下标（2026-10-06 修）。
+    //    `parseInt('')` / `parseInt('abc')` / `parseInt('１')`（全角）**都返回 NaN**，
+    //    而 `NaN < 0` 和 `NaN >= len` **都是 false** —— 下面那道越界拦截整个失效。
+    //    接着 `ids.splice(NaN, 1)`：JS 把 NaN 当 0 → **静默删掉第一个营地号**。
+    //    实测（逐字复刻本函数，真实 ids 三个）：
+    //      `#删除营地`     → index=NaN 拦截=false → 删掉第一个 ❌
+    //      `#删除营地abc`  → index=NaN 拦截=false → 删掉第一个 ❌
+    //      `#删除营地１`   → index=NaN 拦截=false → 删掉第一个 ❌
+    //      `#删除营地0`    → index=-1  拦截=true  → 正确拦住 ✅
+    //    同一条路也服务 `#切换营地`，NaN 落盘后 YAML 会写成 `current: .nan`，
+    //    下游 `ids[NaN]` 直接给用户 `undefined`。
+    //    另：`parseInt` 要显式带基数 10（`parseInt('0x10')` 在无基数时是 16）。
+    const parsed = parseInt(stripAtText(e.msg).replace(prefixRe, ''), 10)
+    if (!Number.isInteger(parsed)) {
+      await e.reply(INVALID_INDEX_HINT)
+      return null
+    }
+    const index = parsed - 1
+
     const { userData, filePath } = this.#loadUserData(userId)
 
-    if (!userData[userId].ids.length) {
+    // 条目的 ids 兜底见 #loadUserData；这里再挡一道，防手改/还原出来的脏数据
+    if (!userData[userId]?.ids?.length) {
       await e.reply(emptyReply)
       return null
     }
@@ -220,7 +253,11 @@ export class AccountManager extends plugin {
   async #renderAccountManageCard(type, wzryId, idList, wzryName = '') {
     const parsedFuncs = [
       { cmd: '#绑定营地', example: '示例: #绑定营地 123' },
-      { cmd: '#营地ID / #王者ID / #我的ID / #我的王者ID', example: '示例: #我的王者ID' },
+      // ⚠️ 这里列的必须是正则真支持的（2026-10-06 修）：规则是
+      //    `#(?:营地|我的(?:王者|荣耀|农药)|(?:王者|荣耀|农药))ID`，「我的」后面必须跟限定词，
+      //    裸的 `#我的ID` 匹配不上任何规则 —— 用户照着发会石沉大海。
+      //    与 README / 帮助图保持一致（那两处也只列三个）。
+      { cmd: '#营地ID / #王者ID / #我的王者ID', example: '示例: #我的王者ID' },
       { cmd: '#切换营地', example: '示例: #切换营地2' },
       { cmd: '#删除营地', example: '示例: #删除营地2' },
       { cmd: '#营地wx全局登录 / #营地QQ全局登录', example: '示例: #营地wx全局登录' },
@@ -261,6 +298,12 @@ export class AccountManager extends plugin {
   async #replyIdCard(e, type, currentId, userInfo, nameMap, tailButton) {
     const idList = this.#formatIdList(userInfo, nameMap)
     const html = await this.#renderAccountManageCard(type, currentId, idList, nameMap[currentId])
+    // ⚠️ 出图失败必须显式判空（2026-10-06 修）：`puppeteer.screenshot` 渲染失败时
+    //    **返回 false 而不抛异常**（renderers/puppeteer/lib/puppeteer.js 末尾
+    //    `if (ret.length === 0 || !ret[0]) return false`），而适配器把非对象元素
+    //    包成文本段（plugins/adapter/OneBotv11.js:60）—— 不拦的话群里收到的是一条
+    //    内容为 `false` 的消息，而不是任何可读的失败提示。
+    if (!html) return e.reply('账号卡片出图失败，稍后再试', shouldQuote())
     await e.reply([html, tailButton()])
   }
 
@@ -543,9 +586,21 @@ export class AccountManager extends plugin {
     const { userId, index, userData, filePath } = target
 
     const deletedId = userData[userId].ids[index]
+    const wasCurrent = Number(userData[userId].current) || 0
     userData[userId].ids.splice(index, 1)
 
-    // 调整current索引
+    // 调整current索引。
+    //
+    // ⚠️⚠️ 删掉的下标**严格小于** current 时，current 必须跟着左移一位（2026-10-06 修）。
+    //    `splice` 之后后面所有元素整体前移，但 current 只是个下标、不会自己动，
+    //    于是「当前选中的号」**静默换成了后一个**。实测（ids=[A,B,C]）：
+    //      current=1(选中B) 删第 1 个 → current 仍 1 → 选中变成 C ❌
+    //      current=0(选中A) 删第 1 个 → current 仍 0 → 选中变成 B ❌
+    //      current=2(选中C) 删第 1 个 → current=1 → 选中仍是 C ✅（那是夹位公式碰巧对了）
+    //    第 3 行这种「碰巧对」正是这个 bug 一直没被发现的原因 —— 只在删**低序号**时暴露。
+    if (index < wasCurrent) userData[userId].current = wasCurrent - 1
+
+    // 再夹一次边界：删的是当前号、或删完只剩更少条目时，current 不能越界
     if (userData[userId].current >= userData[userId].ids.length) {
       userData[userId].current = Math.max(0, userData[userId].ids.length - 1)
     }
@@ -654,7 +709,15 @@ export class AccountManager extends plugin {
     await this.#recallMessage(e, pending.scanStatusMessageId)
     pending.qrMessageId = ''
     pending.scanStatusMessageId = ''
-    pending.scanStatusRecallTimer = null
+    // ⚠️⚠️ 置空前**必须先 clearTimeout**（2026-10-05 修）。
+    //    收尾的 `#clearPendingLogin` 是拿 `if (pending.scanStatusRecallTimer)` 判的，
+    //    这里直接置 null，它之后就**再也不会去清**那个定时器了 ——
+    //    定时器会一直挂到自然到期，而它的闭包抓着整个 `e`（消息事件），
+    //    等于每次登录成功都白留一份会话上下文到最后期限。
+    if (pending.scanStatusRecallTimer) {
+      clearTimeout(pending.scanStatusRecallTimer)
+      pending.scanStatusRecallTimer = null
+    }
   }
 
   async #onLoginStatusChange(e, botUserId, taskId, status = {}) {
@@ -805,7 +868,11 @@ export class AccountManager extends plugin {
     try {
       const result = await waitFor(session, {
         onStatusChange: (status) => {
+          // ⚠️ 回调是**同步**调的，里面 `#onLoginStatusChange` 又有 `await e.reply(...)`，
+          //    不接住的话回复失败（适配器报错 / 风控 / 发送超时）就是未捕获 rejection
+          //    （Node 15+ 默认 throw）。同文件另外两处 void 都挂了 .finally，这里是遗漏。
           void this.#onLoginStatusChange(e, botUserId, taskId, status)
+            .catch(error => logger.warn(`[营地登录] 处理扫码状态回调失败: ${error?.message || error}`))
         }
       })
       if (this.#pendingLogin(botUserId)?.taskId !== taskId) {
@@ -910,6 +977,11 @@ export class AccountManager extends plugin {
 
     try {
       const img = await this.#renderAuthPoolOverview(overviewData)
+      // ⚠️ 手动抛出让下面的 catch 接住（2026-10-06 修）：screenshot 失败是**返回 false**
+      //    不是抛错，所以这个 catch 原本永远不生效 —— 面板渲染不出来时主人收到的是
+      //    一条内容为 `false` 的消息，而不是下面这段精心写的文本摘要回落。
+      //    同 help.js 的 `if (!inventoryImage) throw new Error('截图返回空')` 是同一手法。
+      if (!img) throw new Error('截图返回空')
       await e.reply(img, shouldQuote())
     } catch (error) {
       logger.error(`[王者用户统计] 渲染统计面板失败: ${error.message}`)

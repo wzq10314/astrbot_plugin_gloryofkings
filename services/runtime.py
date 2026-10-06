@@ -82,7 +82,8 @@ def prepare_runtime(engine: Path, destination: Path, settings: dict, host_blackl
     for name in ('watchDeploy.js', 'campImDeploy.js'):
         file = target / 'apps' / name
         text = file.read_text(encoding='utf-8')
-        anchor = '    const probe = await probeRemoteStatus(url)'
+        anchor = ('    const probe = await probeControl(url)' if name == 'watchDeploy.js'
+                  else '    const probe = await probeRemoteStatus(url)')
         if text.count(anchor) != 1:
             raise ValueError('Upstream remote connection hook changed: ' + name)
         text = f'import {{approvedRemote, REMOTE_NOTICE}} from {json.dumps(policy)};\n' + text

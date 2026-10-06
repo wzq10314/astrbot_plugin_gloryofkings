@@ -237,13 +237,25 @@ export async function collectGameNews () {
   return { items, store, firstRun: false }
 }
 
-/** 把这批公告记进已推列表，并把水位推到其中最新的那条 */
+/**
+ * 把这批公告记进已推列表，并把水位推到其中最新的那条。
+ *
+ * ⚠️⚠️ **落盘前必须重新读一次表**（2026-10-06 修）：调用方手里的 `store` 是
+ *    `collectGameNews()` 那一刻的快照，而推送路径中间隔着「取正文 + 多页 puppeteer 截图」
+ *    （实测能跑几十秒到几分钟）。这段时间里群里发「#关闭王者公告推送」会经
+ *    `setGameNewsSub` 同步读-改-写落盘并回复「已关闭」，随后这里用**旧快照**整份覆盖
+ *    （`saveGameNewsStore` 里是 `pushList: store?.pushList || {}`），订阅被悄悄改回开启；
+ *    反过来新开的群也可能被这次覆盖抹掉、要等下一轮才生效。
+ *    只合并 pushed / watermark 两个字段，订阅表一律以盘上最新那份为准。
+ *    `store` 参数保留只为兼容调用方，里面的 pushList 不再使用。
+ */
 export function markGameNewsPushed (store, items) {
   if (!items.length) return
   const ids = items.map(n => String(n.id))
-  store.pushed = [...store.pushed.filter(id => !ids.includes(id)), ...ids]
-  store.watermark = Math.max(Number(store.watermark) || 0, ...items.map(n => n.ms))
-  saveGameNewsStore(store)
+  const fresh = loadGameNewsStore()
+  fresh.pushed = [...fresh.pushed.filter(id => !ids.includes(id)), ...ids]
+  fresh.watermark = Math.max(Number(fresh.watermark) || 0, Number(store?.watermark) || 0, ...items.map(n => n.ms))
+  saveGameNewsStore(fresh)
 }
 
 /* ------------------------------------------------------------ 公告正文 */
@@ -332,10 +344,17 @@ export function sanitizeNewsContent (raw) {
   // ⚠️ 必须跳过 img：上面刚把图片重建成 `<img src="...">`，这条正则若也作用在它身上
   // 会把 src 一起丢掉 —— 图全变成空标签、一张都不显示，而且**页面照样渲得出来**，
   // 只是体积虚低（实测踩过：4 张官方长图的页面 naturalWidth 全是 0）。
+  // ⚠️⚠️ `em` 也必须放行（2026-10-06 修）：上面第 314 行刚把官网的红色 `<span>`
+  // 换成 `<em class="hl">`，而这条正则会把属性一律重建掉 → `class="hl"` 被吃成裸 `<em>`。
+  // 模板 `resources/html/GameNewsDetail.html:117` 的选择器是 `.content em.hl`，
+  // **永远匹配不上**，作者在 298-299 行写的设计意图（深色底上把纯红换成浅红 `.hl`）
+  // 自上线以来从未生效过 —— 实测 10 条真实公告共 55 个 `<em>`，带 class 的 **0 个**。
+  // 所以这里和 img 一样放行原标签（em 只有这一种用法，属性不会被外部注入）。
   html = html.replace(/<\/?([a-z][a-z0-9]*)\b[^>]*>/gi, (tag, name) => {
     const lower = name.toLowerCase()
     if (!KEEP_TAGS.has(lower)) return ''
     if (lower === 'img') return tag
+    if (lower === 'em') return tag.startsWith('</') ? '</em>' : '<em class="hl">'
     return tag.startsWith('</') ? `</${lower}>` : `<${lower}>`
   })
 

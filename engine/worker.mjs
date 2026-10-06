@@ -40,6 +40,8 @@ lines.on('close',()=>process.exit(0));
 process.on('unhandledRejection',()=>emit({type:'diagnostic',code:'BackgroundTaskFailed'}));
 const initial=await first;
 process.chdir(initial.root);
+// Keep master notifications inside this bot's namespace, with upstream recipient selection.
+globalThis.cfg={master:{[String(initial.self_id)]:initial.admins.map(String)}};
 globalThis.gok={root:initial.root,call,emit};
 const events=new AsyncLocalStorage();
 globalThis.plugin=class {

@@ -327,19 +327,19 @@
     "name": "王者公告",
     "rules": [
       {
-        "reg": "^#王者(公告|资讯)列表$",
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#王者(公告|资讯)列表$",
         "flags": "",
         "fnc": "list",
         "permission": ""
       },
       {
-        "reg": "^#王者(公告|资讯)$",
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#王者(公告|资讯)$",
         "flags": "",
         "fnc": "latest",
         "permission": ""
       },
       {
-        "reg": "^#(开启|关闭)王者公告推送$",
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(开启|关闭)王者公告推送$",
         "flags": "",
         "fnc": "toggle",
         "permission": "admin"
@@ -450,7 +450,7 @@
     "name": "王者英雄攻略",
     "rules": [
       {
-        "reg": "^#(王者)?(英雄攻略|攻略|出装|克制|铭文出装|铭文)\\s*(.*)$",
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#王者(英雄攻略|攻略|出装|克制|铭文出装|铭文)\\s*(.*)$",
         "flags": "",
         "fnc": "guide",
         "permission": ""
@@ -645,13 +645,13 @@
     "name": "王者皮肤上新",
     "rules": [
       {
-        "reg": "^#(王者)?(皮肤上新|新皮肤|皮肤日历)$",
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(王者)?(皮肤上新|新皮肤|皮肤日历)$",
         "flags": "",
         "fnc": "calendar",
         "permission": ""
       },
       {
-        "reg": "^#(开启|关闭)(王者)?皮肤上新推送$",
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(开启|关闭)(王者)?皮肤上新推送$",
         "flags": "",
         "fnc": "toggle",
         "permission": "admin"
@@ -907,7 +907,7 @@
     "name": "查询王者英雄梯度榜",
     "rules": [
       {
-        "reg": "^#(王者)?(英雄梯度|梯度|强度)\\s*(.*)$",
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(王者)?(英雄梯度|梯度|强度)\\s*(.*)$",
         "flags": "",
         "fnc": "heroTierList",
         "permission": ""
@@ -948,32 +948,26 @@
     "tasks": []
   },
   {
-    "file": "update.js",
-    "name": "王者插件_更新",
+    "file": "heroFightingCapacity.js",
+    "name": "查询王者英雄战力",
     "rules": [
       {
-        "reg": "^#*(王者|农药)(插件)?(强制)?更新$",
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#查战力[\\s\\S]*$",
         "flags": "",
-        "fnc": "update",
-        "permission": "master"
-      },
-      {
-        "reg": "^#*(王者|农药)(插件)?更新(日志|记录)$",
-        "flags": "",
-        "fnc": "update_log",
-        "permission": "master"
+        "fnc": "checkHeroFightingCapacity",
+        "permission": ""
       }
     ],
     "tasks": []
   },
   {
-    "file": "heroFightingCapacity.js",
-    "name": "查询王者英雄战力",
+    "file": "heroGuideAlias.js",
+    "name": "王者英雄攻略（裸指令）",
     "rules": [
       {
-        "reg": "^#查战力.*",
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(英雄攻略|攻略|出装|克制|铭文出装|铭文)\\s*(.*)$",
         "flags": "",
-        "fnc": "checkHeroFightingCapacity",
+        "fnc": "guide",
         "permission": ""
       }
     ],
@@ -988,6 +982,25 @@
         "flags": "",
         "fnc": "checkHeroSkin",
         "permission": ""
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "update.js",
+    "name": "王者插件_更新",
+    "rules": [
+      {
+        "reg": "^#*(王者|农药)(插件)?(强制)?更新$",
+        "flags": "",
+        "fnc": "update",
+        "permission": "master"
+      },
+      {
+        "reg": "^#*(王者|农药)(插件)?更新(日志|记录)$",
+        "flags": "",
+        "fnc": "update_log",
+        "permission": "master"
       }
     ],
     "tasks": []

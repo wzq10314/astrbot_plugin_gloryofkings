@@ -3,9 +3,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import {fileURLToPath} from 'node:url';
+import {fileURLToPath, pathToFileURL} from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../engine/upstream');
+const hotState = await import(pathToFileURL(path.join(root, 'utils/hotState.js')).href);
 const dependencies = [];
 globalThis.__gameNewsTestDependencies = dependencies;
 globalThis.logger = new Proxy({}, {get: () => () => {}});
@@ -20,7 +21,7 @@ async function load(relative, mocks) {
   source = source.replace(/^import\s+([\s\S]*?)\s+from\s+(['"])([^'"\n]+)\2\s*;?/gm,
     (statement, clause, quote, specifier) => {
       if ((specifier.startsWith('node:') || specifier === 'path') && !(specifier in mocks)) return statement;
-      const index = dependencies.push(mocks[specifier] || fallback) - 1;
+      const index = dependencies.push(mocks[specifier] || (specifier.endsWith('/hotState.js') ? hotState : fallback)) - 1;
       const binding = `globalThis.__gameNewsTestDependencies[${index}]`;
       clause = clause.trim();
       if (clause.startsWith('{')) return `const ${clause.replace(/\s+as\s+/g, ': ')} = ${binding};\n`;

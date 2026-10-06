@@ -50,14 +50,26 @@ const toInt = value => {
   return Number.isFinite(num) ? Math.trunc(num) : 0
 }
 
+/** 保留小数的数值字段用这个。⚠️ 别拿 toInt 顶：`gradeGame` 是 `11.1` 这种一位小数评分，截成 11 就失真了 */
+const toNum = value => {
+  const num = Number(value)
+  return Number.isFinite(num) ? num : 0
+}
+
+/** 规整成整数的字段 */
+const INT_FIELDS = /^(dtEventTime|gameresult|heroId|mvpcnt|losemvp|usedTime|killcnt|deadcnt|assistcnt|roleJob|stars|oldMasterMatchScore|newMasterMatchScore)$/
+/** 规整成数值但**保留小数**的字段 */
+const FLOAT_FIELDS = /^gradeGame$/
+
 /**
  * 整库的内存缓存。null 表示还没读过盘。
  *
  * 为什么要缓存：这个模块的每个导出函数原来都自己 `loadAll()` 一次，而
- * `collectBattles` 翻一页就要走 `archiveBattles`（读+写）+ `getWatermark`（读），
- * 周报翻 12 页 = 几十次整库 readFileSync/writeFileSync。现在 6 个账号 64KB 还无感，
+ * `collectBattles` 每翻一页就要整库读写一遍，周报翻 12 页 = 几十次整库
+ * readFileSync/writeFileSync。现在 6 个账号 64KB 还无感，
  * 但保留 35 天、订阅涨到 20 个号就是 MB 级，而这些同步 IO 全发生在
  * 2 分钟一次的轮询里，会卡住整个 Bot 的事件循环。
+ * （翻页循环现在也只合并内存、循环结束统一落盘一次，见 collectBattles。）
  *
  * 缓存安全的前提：这个文件**只有本模块写**（全仓库检索确认过没有别处写 ARCHIVE_FILE），
  * 且 Yunzai 是单进程，所以内存里的就是权威副本，不存在别人改了盘而我们不知道的情况。
@@ -104,9 +116,15 @@ function slim (item) {
   for (const key of KEEP_FIELDS) {
     const value = item?.[key]
     if (value === undefined || value === null) continue
-    out[key] = typeof value === 'number' || /^(dtEventTime|gameresult|heroId|mvpcnt|losemvp|usedTime|killcnt|deadcnt|assistcnt|roleJob|stars|oldMasterMatchScore|newMasterMatchScore)$/.test(key)
+    // ⚠️ gradeGame 是数值字段（评分），原来不在这个正则里 → 被 String() 存成字符串，
+    //    与同批次的 stars / usedTime 等类型不一致，还留下 `'9.1' > 10 === false` 这种字符串比较陷阱。
+    //    实测线上归档 1859 场里 gradeGame 全是字符串（"11.1"、"9.2"），
+    //    目前每个消费点都各自补了 Number() 所以没出故障（2026-10-06 修）。
+    out[key] = typeof value === 'number' || INT_FIELDS.test(key)
       ? toInt(value)
-      : String(value)
+      : FLOAT_FIELDS.test(key)
+        ? toNum(value)
+        : String(value)
   }
   return out
 }
@@ -166,19 +184,19 @@ function cutoffSec () {
 }
 
 /**
- * 把一批战绩合并进归档。
+ * 把一批战绩合并进**内存缓存**（不落盘）。
  *
- * 幂等：按 gameSeq 去重，同一场重复落库只留一份（轮询每 2 分钟拉的 30 场里
+ * 这是 archiveBattles 去掉 saveAll 的部分。拆出来是给 collectBattles 的翻页循环用：
+ * 原来循环里每页都 archiveBattles → saveAll 整库 writeFileSync 一次，12 页 = 12 次
+ * 整库同步 IO，全卡在事件循环上。拆开后循环内只改内存，结束统一 saveAll 一次；
+ * 单次要落盘的照旧用 archiveBattles（它 = mergeIntoCache + saveAll），语义不变。
+ *
+ * 幂等：按 gameSeq 去重，同一场重复合并只留一份（轮询每 2 分钟拉的 30 场里
  * 绝大多数都是上一轮见过的，全靠这里去重）。
  *
- * @param {string|number} campId 营地ID
- * @param {Array<object>} list 战绩列表项（原始的，函数内部自己裁字段）
  * @returns {number} 本次新增了几场
  */
-export function archiveBattles (campId, list) {
-  const key = String(campId || '')
-  if (!key || !Array.isArray(list) || !list.length) return 0
-
+function mergeIntoCache (key, list) {
   const all = loadAll()
   const existed = all[key]?.battles || []
 
@@ -196,7 +214,6 @@ export function archiveBattles (campId, list) {
   }
 
   const added = bySeq.size - before
-  // 没有新场次就别写文件：轮询每 2 分钟一次，绝大多数轮次都是这种情况
   if (!added) return 0
 
   const cutoff = cutoffSec()
@@ -207,12 +224,31 @@ export function archiveBattles (campId, list) {
   const prevMark = toInt(all[key]?.oldestFetched)
   all[key] = {
     updatedAt: Date.now(),
-    // 水位要跟着写回，别被这次落库覆盖掉；而且裁剪已经把老数据删了，
+    // 水位要跟着写回，别被这次合并覆盖掉；而且裁剪已经把老数据删了，
     // 水位不能还声称覆盖到裁剪线之前
     ...(prevMark > 0 ? { oldestFetched: Math.max(prevMark, cutoff) } : {}),
     battles
   }
-  saveAll(all)
+
+  return added
+}
+
+/**
+ * 把一批战绩合并进归档（含落盘）。
+ *
+ * @param {string|number} campId 营地ID
+ * @param {Array<object>} list 战绩列表项（原始的，函数内部自己裁字段）
+ * @returns {number} 本次新增了几场
+ */
+export function archiveBattles (campId, list) {
+  const key = String(campId || '')
+  if (!key || !Array.isArray(list) || !list.length) return 0
+
+  const added = mergeIntoCache(key, list)
+  // 没有新场次就别写文件：轮询每 2 分钟一次，绝大多数轮次都是这种情况
+  if (!added) return 0
+
+  saveAll(loadAll())
 
   return added
 }
@@ -269,6 +305,10 @@ export async function collectBattles (campId, qq, fromSec, { maxPages = 12, toSe
   let reached = 0
   let fetched = 0
   let truncated = false
+  let pendingFlush = false
+  // 拉取失败过（抛错 / 非 0 业务码）就是「这次没能补上」，跟「确实翻到底了」必须分开。
+  // 见下面返回值处 `incomplete` 的说明。
+  let failed = false
 
   for (let page = 0; page < maxPages; page += 1) {
     let res
@@ -276,11 +316,13 @@ export async function collectBattles (campId, qq, fromSec, { maxPages = 12, toSe
       res = await ApiService.getMoreBattleList(key, String(qq), { option: 0, lastTime })
     } catch (error) {
       logger.debug(`[战绩归档] ${key} 第 ${page + 1} 页拉取失败: ${error.message}`)
+      failed = true
       break
     }
 
     if (Number(res?.returnCode || 0) !== 0) {
       logger.debug(`[战绩归档] ${key} 第 ${page + 1} 页返回异常码 ${res?.returnCode}`)
+      failed = true
       break
     }
 
@@ -289,7 +331,9 @@ export async function collectBattles (campId, qq, fromSec, { maxPages = 12, toSe
     if (!list.length) break
 
     fetched += 1
-    archiveBattles(key, list)
+    // 只攒进内存、不落盘：12 页翻下来每页 saveAll 一次整库同步 IO（全卡在事件循环上），
+    // 循环结束统一 flush 一次就够。中途崩了也就是这轮补的页没存，下轮轮询会再补
+    if (mergeIntoCache(key, list) > 0) pendingFlush = true
     reached = toInt(list[list.length - 1]?.dtEventTime)
 
     // 这一页已经翻过区间起点，够了
@@ -316,14 +360,37 @@ export async function collectBattles (campId, qq, fromSec, { maxPages = 12, toSe
     if (page === maxPages - 1) truncated = true
   }
 
+  // 循环里攒的合并结果统一落盘（整库一次写，setWatermark 还会再写一次带水位的版本）
+  if (pendingFlush) saveAll(loadAll())
+
   if (reached > 0) setWatermark(key, reached)
 
   const finalMark = getWatermark(key)
+
+  // ⚠️⚠️ `incomplete`：这次**没能确认**覆盖到请求的起点（2026-10-06 修）。
+  //
+  // 原先三种情况（抛错 / 非 0 业务码 / 空 list）都只是 `break`，而
+  // `coveredFrom` 在没拿到水位时会**默认等于调用方请求的 `from`** ——
+  // 于是「一页都没拉到」和「真的翻到了 from」返回值一模一样，调用方无从分辨。
+  // 下游 `reportStore` 只在 `truncated && coveredFrom > fromSec` 时才写
+  // 「数据覆盖自…」，所以拉取失败时图上**一个覆盖不足的标注都没有**，
+  // 用户看到的是「今天还没有对局记录」这种确定性结论（其实是没拉到）。
+  // 返回的 `fetched` 全仓也无人读取（grep 确认），等于失败被彻底吞掉。
+  //
+  // 实测：模拟 `-30107` 抛错 / `-10107` / 空列表三种失败，
+  // 修复前输出完全相同的 `{truncated:false, fetched:0, coveredFrom:<请求的 from>}`。
+  //
+  // 判据：请求了 from（说明要这段历史）却一页都没成功拉回来 → 覆盖不足。
+  // 空 list 不算 failed（那是「确实没有更早的了」，第 335 行已把 reached 定成 from）。
+  const incomplete = from > 0 && fetched === 0
 
   return {
     battles: inRange(loadArchive(key)),
     coveredFrom: finalMark > 0 ? Math.max(finalMark, from) : from,
     truncated,
-    fetched
+    fetched,
+    // 拉取失败 or 一页都没拿到：让调用方能给出「数据可能不全」的降级文案
+    incomplete,
+    failed
   }
 }

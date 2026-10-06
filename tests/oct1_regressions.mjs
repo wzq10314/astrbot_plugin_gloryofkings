@@ -2,9 +2,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import {fileURLToPath} from 'node:url';
+import {fileURLToPath, pathToFileURL} from 'node:url';
 
 const root = path.resolve(process.argv[2] || path.join(path.dirname(fileURLToPath(import.meta.url)), '../engine/upstream'));
+const hotState = await import(pathToFileURL(path.join(root, 'utils/hotState.js')).href);
 const dependencies = [];
 globalThis.__oct1Dependencies = dependencies;
 globalThis.logger = new Proxy({}, {get: () => () => {}});
@@ -17,7 +18,7 @@ async function load(relative, mocks) {
   source = source.replace(/^import\s+([\s\S]*?)\s+from\s+(['"])([^'"\n]+)\2\s*;?/gm,
     (statement, clause, quote, specifier) => {
       if ((specifier.startsWith('node:') || specifier === 'path') && !(specifier in mocks)) return statement;
-      const index = dependencies.push(mocks[specifier] || fallback) - 1;
+      const index = dependencies.push(mocks[specifier] || (specifier.endsWith('/hotState.js') ? hotState : fallback)) - 1;
       const binding = `globalThis.__oct1Dependencies[${index}]`;
       clause = clause.trim();
       if (clause.startsWith('{')) return `const ${clause.replace(/\s+as\s+/g, ': ')} = ${binding};\n`;
@@ -167,7 +168,8 @@ for (const [filename, className, service, directory] of [
     '../utils/deploy.js': {
       normalizeBase: value => value, STATE_FILE: '.fixture-state',
       installPackage: async () => {installs++; return {ok: true, sha: 'fixture', updated: true}},
-      fmtUptime: () => '1分钟', probeStatus: async () => ({ffmpeg: true, clients: []}), waitStatus: async () => ({ffmpeg: true, clients: []})
+      fmtUptime: () => '1分钟', probeStatus: async () => ({ffmpeg: true, clients: []}), waitStatus: async () => ({ffmpeg: true, clients: []}),
+      probeControlPort: async () => ({ffmpeg: true, clients: []}), waitControlPort: async () => ({ffmpeg: true, clients: []})
     }
   });
   globalThis.gok = {call: async (method, args) => {assert.equal(method, 'server_dependencies'); assert.equal(args.directory, serverDir); return {ok: true}}};

@@ -60,6 +60,17 @@ class Tool(unittest.IsolatedAsyncioTestCase):
         self.plugin.dependencies.ready=True
     async def asyncTearDown(self):
         await self.plugin.terminate();self.temp.cleanup()
+    async def test_generic_guide_leaves_primary_handler_for_other_plugins(self):
+        for text in ('#攻略 妲己', '#出装 妲己', '#铭文 妲己', '#克制 妲己', '#英雄攻略 妲己', '#铭文出装 妲己'):
+            e=Event(text)
+            await self.plugin.on_message(e)
+            self.assertFalse(e.stopped)
+            self.assertFalse(self.plugin.bridges)
+        self.assertFalse(main.GloryOfKingsPlugin.generic_hero_guide('#王者英雄攻略 妲己'))
+        e=Event('你好')
+        await self.plugin.on_generic_hero_guide(e)
+        self.assertFalse(e.stopped)
+        self.assertFalse(self.plugin.bridges)
     async def test_query_returns_actual_failure_and_deduplicates(self):
         e=Event()
         answer=await self.plugin.kings_tool(e,'我的战绩')

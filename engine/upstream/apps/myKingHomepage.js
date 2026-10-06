@@ -20,6 +20,15 @@ const MOD_ID = {
 }
 
 /**
+ * 模板里资源路径的前缀。
+ *
+ * 渲染产物落在 `temp/html/myKingHomepage/` 下，所以要从那里往上数三层才能回到
+ * 插件目录。模板里用 `{{_res_path}}img/xxx.png` 拼地址，这个常量给 JS 侧
+ * 需要兜底图时复用，避免两处各写一遍、改一处漏一处。
+ */
+const RES_PATH = '../../../plugins/GloryOfKings-Plugin/resources/'
+
+/**
  * 段位 → 旗帜图编号（`resources/img/flag{N}.png`）。
  *
  * 判定顺序不能调：`最强王者` 也包含「王者」两个字，但它在星耀之上，
@@ -34,14 +43,66 @@ function resolveFlagImg (rank5v5) {
 }
 
 /**
+ * 解析营地的「字符串里再套 JSON」字段，失败一律退回空对象。
+ *
+ * ⚠️⚠️ 2026-10-06 加的。修的是一个**主页图必崩**的真 bug：
+ *   营地会给 `param1` 空串（实测同一响应里 modId 304/408/105/201/409/202
+ *   的 param1 全是 `""`），也会整个 mod 都不给 —— 没打过 10v10 的号没有 708、
+ *   新号没定级可能没有 701、巅峰赛没打过没有 702。
+ *   原实现是 `JSON.parse(modePeakRace.param1)` 和 `mods.find(...).param1` 直接写，
+ *   这些情况**每一步都当场抛**，用户只看到「主页数据异常」。
+ *
+ *   实测：把原逻辑抽出来喂 15 种营地真实可能给的数据形状，**12 种直接崩**
+ *   （空 mods / 缺 708 / 缺 701 / 缺 702 / param1 空串 / param1 为 null /
+ *    没有 flagPag / flagPag 不是 .pag / flagPag 为 null …）。
+ *
+ *   这里只兜「解析」这一层：拿不到就返回 `{}`，让下面各处按缺数据处理，
+ *   出图时对应字段显示「暂无」而不是整张图失败。
+ */
+function parseParam (raw) {
+  // 数组也是 object，但它不是我们要的形状（下面各处都按对象取字段）—— 一并当没有
+  const usable = value => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+
+  if (usable(raw)) {
+    return raw
+  }
+  const text = String(raw ?? '').trim()
+  if (!text) {
+    return {}
+  }
+  try {
+    const parsed = JSON.parse(text)
+    return usable(parsed) ? parsed : {}
+  } catch {
+    // 解析不了就当中没有：主页图少一项，总好过整张图出不来
+    return {}
+  }
+}
+
+/**
+ * 从 `flagPag` 地址里抠出旗帜图编号（`resources/img/flag{N}.png` 的 N）。
+ *
+ * ⚠️ 两个坑都在原实现里踩过：
+ *   ① `/(\d+).pag/` 的 `.` **没转义** —— 它匹配任意字符，
+ *      于是 `2xpag`、`12-pag` 这种也会被当成合法并取出错误数字；
+ *   ② 抠不到时 `match()` 返回 null，原实现直接 `[1]` → TypeError 崩掉整张图。
+ *      这里抠不到返回 ''，模板会去找 `flag.png`（不存在）→ 显示空图，
+ *      但**不会**让整个主页渲染失败。
+ */
+function parseFlagPag (flagPag) {
+  const matched = String(flagPag ?? '').match(/(\d+)\.pag/)
+  return matched ? matched[1] : ''
+}
+
+/**
  * 把主页接口返回的数据整理成模板要的形状。
  *
  * 抽成独立函数（而不是塞在回复流程里）有两个好处：出错时异常边界清晰
  * ——上游那种写法里，任何一步抛错都会连累后面几个账号；这里一个账号
  * 解析失败只影响它自己。
  *
- * ⚠️ 几个字段是营地的「字符串里再套 JSON」写法，解析失败会抛错，
- *    由调用方的 catch 兜住并提示「主页数据异常」。
+ * ⚠️ 几个字段是营地的「字符串里再套 JSON」写法。**解析一律走 parseParam**，
+ *    单个模式缺数据/格式变了只让那一项显示「暂无」，不再连累整张图。
  *
  * @param {object} profileData 主页接口的完整响应
  * @param {object} roleData 命中的那个角色
@@ -49,7 +110,8 @@ function resolveFlagImg (rank5v5) {
  * @returns {object} 渲染模板用的数据
  */
 function buildHomepageData (profileData, roleData, headData) {
-  const { mods } = headData
+  // mods 也可能整个缺失（营地偶尔不给 head.mods），兜成空数组
+  const mods = Array.isArray(headData?.mods) ? headData.mods : []
   const {
     roleName, // 昵称
     roleIcon, // 头像
@@ -62,30 +124,79 @@ function buildHomepageData (profileData, roleData, headData) {
   } = roleData
 
   const gameOnline = ONLINE_TEXT[onlineCode]
-  const onlineTime = moment(onlineTimestamp * 1000).locale('zh-cn').calendar()
-  const offlineTime = moment(offlineTimestamp * 1000).locale('zh-cn').calendar()
+  // ⚠️⚠️ 时间戳为 0 / 缺失时必须给「—」，不能让 moment 去格式化（2026-10-06 修）。
+  //    `moment(0)` 是**合法**的（= 1970-01-01 UTC），`.calendar()` 于是渲染出
+  //    「1970/01/01」—— 看起来像真数据，用户会以为这人 1970 年上过线。
+  //    实测线上 24 个账号里有 2 个（52334903、1781746532）字段就是 0。
+  //    `Number('')` 也是 0，所以空串同样走这条路。
+  const fmtCalendar = (ts) => {
+    const sec = Number(ts)
+    // 小于等于 0 一律当「没有」，另外挡住明显不是秒级时间戳的脏值
+    if (!Number.isFinite(sec) || sec <= 0) return '—'
+    return moment(sec * 1000).locale('zh-cn').calendar()
+  }
+  const onlineTime = fmtCalendar(onlineTimestamp)
+  const offlineTime = fmtCalendar(offlineTimestamp)
 
   const mode10v10 = mods.find(mod => mod.modId === MOD_ID.rank10v10)
   const mode5v5 = mods.find(mod => mod.modId === MOD_ID.rank5v5)
   const modePeakRace = mods.find(mod => mod.modId === MOD_ID.peakRace)
 
-  // 巅峰赛的 param1 是一段 JSON 字符串，里面还套着 flagPag 的图片文件名
-  modePeakRace.param1 = JSON.parse(modePeakRace.param1)
-  modePeakRace.param1.flagPag = modePeakRace.param1.flagPag.match(/(\d+).pag/)[1]
+  // ⚠️ 下面每个模式都可能整个缺失（没打过 10v10 / 新号没定级 / 巅峰赛没打过），
+  //    param1 也可能是空串 —— 一律按「这项没有数据」处理，绝不抛错。
+  const peakParam = parseParam(modePeakRace?.param1)
+  const v5Param = parseParam(mode5v5?.param1)
+  const v10Param = parseParam(mode10v10?.param1)
+
+  // 把抠出来的旗帜编号写回 param1，模板里读的是 `modePeakRace.param1.flagPag`。
+  // ⚠️ 必须**复制**、不能就地改 `modePeakRace.param1`：那是调用方响应对象里的字段，
+  //    改了以后同一份数据再渲染一次，flagPag 已经是 `'2'` 这种裸编号，
+  //    正则再也匹配不到 `.pag`，旗帜就变成破图（实测踩到过）。
+  const peakRace = modePeakRace
+    ? { ...modePeakRace, param1: { ...peakParam, flagPag: parseFlagPag(peakParam.flagPag) } }
+    : undefined
 
   const mod = mods.filter(i => i.stype === 0)
   const combat = mods.find(i => i.stype === 1)
 
-  const { rankingStar, starImg } = JSON.parse(mode5v5.param1)
-  const rank10v10 = `${mode10v10.name} ${JSON.parse(mode10v10.param1).rankingStar}星`
-  const rank5v5 = `${mode5v5.name} ${rankingStar}星`
+  const { rankingStar, starImg } = v5Param
+
+  /**
+   * 段位文案：有星数才拼「N星」，没有就只显示段位名。
+   *
+   * 不能拼成「永恒钻石I 暂无星」这种 —— 缺星数的号（新号、营地改版）
+   * 段位名本身是有效的，读起来反而别扭。整个模式缺失时才是「暂无」。
+   */
+  const rankText = (mode, param) => {
+    if (!mode) return '暂无'
+    const star = param.rankingStar
+    const hasStar = star !== undefined && star !== null && star !== ''
+    return hasStar ? `${mode.name} ${star}星` : String(mode.name ?? '暂无')
+  }
+  const rank10v10 = rankText(mode10v10, v10Param)
+  const rank5v5 = rankText(mode5v5, v5Param)
   const isKing = rank5v5.includes('王者')
+  const flagImg = resolveFlagImg(rank5v5)
+
+  // 巅峰赛这一块的兜底。
+  //
+  // 背景：`modePeakRace` 存在但 `param1` 是空串时（营地没给巅峰赛数据），
+  // 下面三个字段全是 undefined，模板直接拼进 src 会渲染出破图占位。
+  // ⚠️ 兜底图的选择：`roleIcon` 用玩家自己的头像（模板那层金框是另一张
+  //    `modePeakRace-avatar.png`，它是边框不是头像，拿它当头像是错的）；
+  //    旗帜抠不到就退回 5v5 的编号，别留空。
+  if (peakRace) {
+    const param = peakRace.param1
+    if (!param.flagPag) param.flagPag = flagImg
+    if (!param.roleIcon) param.roleIcon = roleIcon || ''
+    if (param.desc === undefined || param.desc === null || param.desc === '') param.desc = '未定级'
+  }
 
   return {
     imgType: getImgType(),
     tplFile: 'plugins/GloryOfKings-Plugin/resources/html/MyKingHomepage.html',
     // 渲染产物落在 temp/html/myKingHomepage/ 下，所以资源路径要从那里往上数三层
-    _res_path: '../../../plugins/GloryOfKings-Plugin/resources/',
+    _res_path: RES_PATH,
     roleIcon,
     roleName,
     gameLevel,
@@ -94,17 +205,22 @@ function buildHomepageData (profileData, roleData, headData) {
     rank5v5,
     areaName,
     roleText,
-    flagImg: resolveFlagImg(rank5v5),
-    rankIcon: mode5v5.icon,
+    flagImg,
+    // mode5v5 / modePeakRace 整个缺失时 icon 也是 undefined —— 给张兜底图，
+    // 否则模板会去请求空地址，渲染出破图（原实现是 `mode5v5.icon`，缺了还当场崩）
+    rankIcon: mode5v5?.icon || `${RES_PATH}img/roleJob.png`,
     onlineTime,
     offlineTime,
     rankingStar,
-    starImg,
+    // 星条图缺失就给空串，模板用 {{if}} 跳过这一层。
+    // ⚠️ 别拿 `star.png` 兜底：那是一颗星，塞进「星条」的尺寸里会被拉成
+    //    一张糊满段位盾牌的大金星（实测踩到过，比空着还难看）。
+    starImg: starImg || '',
     isKing,
     isOffline: gameOnline === '离线',
     honor: isKing ? 'honor' : 'roleJob',
-    content_7: modePeakRace.content,
-    modePeakRace,
+    content_7: peakRace?.content,
+    modePeakRace: peakRace,
 
     mod,
     combat
@@ -229,21 +345,26 @@ export class MyKingHomepage extends plugin {
       // 频控（-30107）走不到这里：getProfile 命中频控时是抛错的，
       // 已被上面的 catch 接走，由 formatUserFacingError 转成对用户友好的提示。
 
-      if (profileData.returnCode === -10107) {
-        if (IDs.length === 1) {
-          await e.reply(`ID: ${ID},召唤师隐藏了主页信息，无法查看`)
-        } else {
-          pushFailure(ID, '召唤师隐藏了主页信息，无法查看')
-        }
-        continue
-      }
-
+      // ⚠️ 判空必须排在解引用之前（2026-10-06 修）：下面那句 `profileData.returnCode` 先执行的话，
+      //    getProfile 真给出 null/undefined 时这里抛 TypeError，而此时上面的 try/catch 已结束、
+      //    下面第 367 行的 try 还没开始 —— 异常直接冒泡出 replyHomepages：单 ID 场景用户
+      //    一条回复都收不到，多 ID 场景（#全部主页）后面几个账号也一个都不查，
+      //    而函数头承诺的正是「多账号时逐个报错、不中断」。
       if (!profileData || !profileData.data || !profileData.data.roleList) {
         logger.debug(`[王者主页] ${ID} 返回结构异常: ${JSON.stringify(profileData)?.slice(0, 500)}`)
         if (IDs.length === 1) {
           await e.reply('获取数据失败,请稍后重试')
         } else {
           pushFailure(ID, '获取数据失败,请稍后重试')
+        }
+        continue
+      }
+
+      if (profileData.returnCode === -10107) {
+        if (IDs.length === 1) {
+          await e.reply(`ID: ${ID},召唤师隐藏了主页信息，无法查看`)
+        } else {
+          pushFailure(ID, '召唤师隐藏了主页信息，无法查看')
         }
         continue
       }
@@ -262,7 +383,22 @@ export class MyKingHomepage extends plugin {
         }
 
         const data = buildHomepageData(profileData, roleData, headData)
-        imgBuffers.push(await puppeteer.screenshot('myKingHomepage', data))
+        // ⚠️ 只收真图（2026-10-06 修）：screenshot 渲染失败是**返回 false 而不抛错**
+        //    （renderers/puppeteer/lib/puppeteer.js 末尾 `if (ret.length === 0 || !ret[0]) return false`），
+        //    而原来无条件 push 进 imgBuffers —— 下面 `e.reply([...imgBuffers, button])` 会把
+        //    false 当文本段发进群（适配器把非对象元素包成 {type:'text', data:{text:false}}）。
+        //    这个 catch 接不到它，所以必须自己判。
+        const shot = await puppeteer.screenshot('myKingHomepage', data)
+        if (!shot) {
+          logger.error(`[王者主页] ${ID} 出图失败`)
+          if (IDs.length === 1) {
+            await e.reply(`ID: ${ID}，主页出图失败，稍后再试`)
+          } else {
+            pushFailure(ID, '主页出图失败，已跳过')
+          }
+          continue
+        }
+        imgBuffers.push(shot)
       } catch (error) {
         logger.error(`[王者主页] 渲染 ${ID} 失败: ${error.message}`)
         if (IDs.length === 1) {

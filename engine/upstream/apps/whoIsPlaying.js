@@ -34,6 +34,8 @@ import puppeteer from '../../../lib/puppeteer/puppeteer.js'
 import { loadPushList, subGroups, getHeroNameMap, normalizeName, ONLINE_LABEL, collectSnapshot } from '../utils/pushStore.js'
 import { membersOfGroup, isIndexReady, refreshGroupIndex } from '../utils/groupIndex.js'
 import { mapConcurrent } from '../utils/parallel.js'
+// 现刷并发锁跨热重载共享：模块级 `let` 在热重载后是新变量，锁会被架空（见 utils/hotState.js）
+import { hotBox } from '../utils/hotState.js'
 import { getImgType, Button, shouldQuote, getUserAvatar, getGroupAvatar, isBlackUser, isProfileHidden, getCurrentId, ApiService } from '#utils'
 import { heroIconUrl } from '../utils/reportStore.js'
 
@@ -70,8 +72,7 @@ const MAX_REFRESH = 40
  */
 const NO_SUB = Object.freeze({ battle: false, online: false })
 
-/** 现刷并发锁：一次只允许一条指令在刷，避免几个人同时发把请求量翻倍 */
-let refreshing = false
+/** 现刷并发锁（与门限一起锚在 hotBox 里，见下方 lastRefreshAt 的说明） */
 
 /**
  * 「上次现刷时刻」，qq → 毫秒。
@@ -79,15 +80,24 @@ let refreshing = false
  * 现刷**不落盘**（理由见 refreshSnapshots），所以 REFRESH_COOLDOWN_MS 这个门限
  * 没法靠订阅项里的 lastSeenAt 记（那是常驻轮询写的），得自己在内存里记一份。
  * 进程重启后丢失，等于放行一次全量刷，无所谓。
+ *
+ * ⚠️ 但**热重载**丢它就不是「无所谓」了：热重载比重启频繁得多（plugins/ 下改任何文件都会触发），
+ *    每次热重载都把门限清空 → 下一个人发指令又能全量刷一遍。所以和锁一起锚进 hotBox。
  */
-const lastRefreshAt = new Map()
+const S = hotBox('whoIsPlaying.refreshing', {
+  refreshing: false,
+  lastRefreshAt: new Map(),
+  lastRefreshPatch: new Map()
+})
+/** 「上次现刷时刻」，qq → 毫秒（跨热重载共享，见上） */
+const lastRefreshAt = S.lastRefreshAt
 
 /**
  * 「上次现刷到的字段」，qq → patch。门限内复用同一份，避免「第二个人发指令反而
  * 看到更旧的状态」（现刷不落盘，盘上那份只有常驻轮询写过）。
  * 和 lastRefreshAt 一起清、一起涨，上限见 refreshSnapshots 收尾那几行。
  */
-const lastRefreshPatch = new Map()
+const lastRefreshPatch = S.lastRefreshPatch
 
 /**
  * 「刚打完」的展示窗口：对局结束后这么久之内还单独列一组。
@@ -294,9 +304,9 @@ export class WhoIsPlaying extends plugin {
     const picked = due.slice(0, MAX_REFRESH)
     if (selfEntry && !picked.includes(selfEntry)) picked[picked.length - 1] = selfEntry
 
-    if (!picked.length || refreshing) return out
+    if (!picked.length || S.refreshing) return out
 
-    refreshing = true
+    S.refreshing = true
     try {
       // 一个人一秒多，串行拉完要好一会儿，不先说一声群里会以为机器人卡死了。
       // 注意请求是**按账号并发**的（N 个号 N 路并行），秒数要按账号数折算，
@@ -312,6 +322,12 @@ export class WhoIsPlaying extends plugin {
         shouldQuote()
       )
 
+      // 本轮**真刷到**的人。收尾续期只能遍历它，不能遍历 `out` ——
+      // `out` 里还混着上面「门限内直接复用」的那批人（282-285 行），
+      // 给复用者也续期会让他的门限永远到不了期：他一直拿到第 1 次那份只在内存里的
+      // 旧快照，而「数据较旧」标记看的是盘上的 lastSeenAt，图上不会标旧 ——
+      // 用户看到的是过期数据却毫无提示。见文件头对 REFRESH_COOLDOWN_MS 的说明。
+      const refreshed = new Set()
       await mapConcurrent(picked, async ([qq, sub]) => {
         const campId = getCurrentId(qq)
         if (!campId || isProfileHidden(campId)) return
@@ -320,7 +336,10 @@ export class WhoIsPlaying extends plugin {
           // snapshot: true —— 名单里的人一律采一份在线状态，跟「他有没有开推送」无关。
           // 名单现在来自群成员索引，绝大多数人压根没有订阅记录（sub 是 NO_SUB）
           const { patch } = await collectSnapshot(qq, campId, sub, Date.now(), { snapshot: true })
-          if (Object.keys(patch).length) out.set(qq, patch)
+          if (Object.keys(patch).length) {
+            out.set(qq, patch)
+            refreshed.add(qq)
+          }
         } catch (error) {
           // 单个人失败不该毁掉整张图：留旧快照（图上会标「数据较旧」）
           logger.debug(`[王者谁在打游戏] 现刷 ${qq} 失败: ${error.message}`)
@@ -334,12 +353,12 @@ export class WhoIsPlaying extends plugin {
         lastRefreshPatch.clear()
         lastRefreshAt.clear()
       }
-      for (const [qq, patch] of out) {
+      for (const qq of refreshed) {
         lastRefreshAt.set(qq, Date.now())
-        lastRefreshPatch.set(qq, patch)
+        lastRefreshPatch.set(qq, out.get(qq))
       }
     } finally {
-      refreshing = false
+      S.refreshing = false
     }
 
     return out
@@ -419,11 +438,16 @@ function buildRow (qq, sub, heroMap, now) {
   const gaming = String(sub?.lastGaming || '') === '1'
 
   // 对局时长：dtEventTime 是一局的开始时刻，一局内恒定。用它算「已经打了多久」。
-  // 服务端时间戳，跟本地时间可能有偏差，负值/离谱值就不显示（见 durationText）
-  const gamingFor = gaming ? durationText(Number(sub?.lastGamingStart) || 0, now) : ''
+  // ⚠️ 读的是**快照专用**字段 `lastGamingStartSnap`，不是 `lastGamingStart` ——
+  //    后者是战绩推送的游标（只在发送成功后推进），拿它算时长会显示成上一局的时间。
+  // ⚠️ `lastGamingStartSnap` / `onlineSince` 都是**秒**（营地时间戳；见
+  //    `pushStore.resolveOnlineSince` 的入参名 `nowSec`），而 `now` 是毫秒，
+  //    所以要把 now 折成秒再传，别在 durationText 里跨量纲相减。
+  const nowSec = Math.floor(now / 1000)
+  const gamingFor = gaming ? durationText(Number(sub?.lastGamingStartSnap) || 0, nowSec) : ''
 
   // 在线时长：onlineSince 是观察到的上线时刻（订阅时已在线会回退到营地 onlineTime）
-  const onlineFor = state !== 0 ? durationText(Number(sub?.onlineSince) || 0, now) : ''
+  const onlineFor = state !== 0 ? durationText(Number(sub?.onlineSince) || 0, nowSec) : ''
 
   // 段位：推送轮询从战绩列表顺手记的（只开在线状态的号没有，保留上一轮的值）
   const rankJobName = String(sub?.roleJobName || '')
@@ -463,6 +487,11 @@ function buildRow (qq, sub, heroMap, now) {
     idleInGame,
     seenAt,
     stale: seenAt > 0 && now - seenAt > STALE_MS,
+    // 图上「数据较旧」标记要的相对时间。模板里没法算（agoText 在 JS 侧），
+    // 所以在这里算好带上；文案回落（renderText）用的是同一个函数、同一份结果。
+    // ⚠️ 原来只有 `stale` 没有这个字段，而模板从头到尾没渲染过 stale ——
+    //    注释三处写着「图上会带标记」，实际图上一直什么都没有（2026-10-06 修）。
+    staleAgo: seenAt > 0 && now - seenAt > STALE_MS ? agoText(seenAt, now) : '',
     // 新增展示字段：对局/在线时长、段位、刚打完
     gamingFor,
     onlineFor,
@@ -475,18 +504,26 @@ function buildRow (qq, sub, heroMap, now) {
 /**
  * 时长文案，「打了 12 分钟」这种。
  *
+ * ⚠️⚠️ **两个参数都必须是「秒」**（2026-10-06 修）。原先 `now` 传的是毫秒，
+ *    而 `since` 是秒（营地时间戳），于是 `now - since` 恒约 1.79e12 毫秒 ≈ 2 万天，
+ *    必然撞下面「超过一天当脏数据」的守卫 → **永远返回空串**。
+ *    后果：`WhoIsPlaying.html` 的 `{{if row.gamingFor}}` / `{{if row.onlineFor}}`
+ *    两个分支永远不成立，「已打 X 分钟」「在线 X 分钟」整块静默消失
+ *    （实测：模拟「12 分钟前开局且在线」→ 两个字段都是 `""`；
+ *      改成秒后正确得到「12 分钟」）。
+ *
  * 起点是服务端时间戳，和本地时钟可能有偏差；算出来是负数（时钟不同步）或者超过一天
  * （异常大的值，多半是脏数据）就返回空串，宁可不显示也不能给出离谱的时长。
  *
- * @param {number} since 起点时间戳（毫秒），0 表示没有
- * @param {number} now 当前时间戳（毫秒）
+ * @param {number} since 起点时间戳（**秒**），0 表示没有
+ * @param {number} now 当前时间戳（**秒**）
  * @returns {string} 空串表示算不出来
  */
 function durationText (since, now) {
   if (!since) return ''
-  const ms = now - since
-  if (ms < 0 || ms > 24 * 3600 * 1000) return ''
-  const min = Math.floor(ms / 60000)
+  const sec = now - since
+  if (sec < 0 || sec > 24 * 3600) return ''
+  const min = Math.floor(sec / 60)
   if (min < 1) return '刚开始'
   if (min < 60) return `${min} 分钟`
   const hour = Math.floor(min / 60)

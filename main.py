@@ -16,7 +16,7 @@ from .services.tool_commands import normalize as normalize_tool_command
 from .services.tool_commands import private_only, PRIVATE_NOTICE
 
 
-@register('astrbot_plugin_gloryofkings', 'wzq10314', '王者营地全功能核心 AstrBot 适配', '1.0.14')
+@register('astrbot_plugin_gloryofkings', 'wzq10314', '王者营地全功能核心 AstrBot 适配', '1.0.15')
 class GloryOfKingsPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -156,6 +156,20 @@ class GloryOfKingsPlugin(Star):
 
     @event_filter.event_message_type(event_filter.EventMessageType.ALL, priority=5)
     async def on_message(self, event: AstrMessageEvent):
+        if self.generic_hero_guide(self.event_data(event)['msg']): return
+        await self.dispatch_message(event)
+
+    @staticmethod
+    def generic_hero_guide(text):
+        return bool(re.match(r'^#(?:英雄攻略|攻略|出装|克制|铭文出装|铭文)', text))
+
+    # AstrBot orders larger priority first. Let other plugins handle common aliases first.
+    @event_filter.event_message_type(event_filter.EventMessageType.ALL, priority=-5000)
+    async def on_generic_hero_guide(self, event: AstrMessageEvent):
+        if self.generic_hero_guide(self.event_data(event)['msg']):
+            await self.dispatch_message(event)
+
+    async def dispatch_message(self, event: AstrMessageEvent):
         if event.get_platform_name() not in {'aiocqhttp', *OFFICIAL_PLATFORMS}: return
         data = self.event_data(event)
         text = data['msg']
@@ -280,7 +294,7 @@ class GloryOfKingsPlugin(Star):
         if time.monotonic()-timestamp<300 and text: return text
         manifest=json.loads((Path(__file__).parent/'UPSTREAM.json').read_text(encoding='utf-8'))
         current=manifest['commit']
-        prefix=f'AstrBot 适配版 1.0.14\n上游：{manifest["repository"]}\n本版基准：{current[:12]}'
+        prefix=f'AstrBot 适配版 1.0.15\n上游：{manifest["repository"]}\n本版基准：{current[:12]}'
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15),trust_env=True) as client:
                 async with client.get('https://gitee.com/api/v5/repos/longhengmu/GloryOfKings-Plugin/commits',params={'sha':'master','per_page':5}) as response:
