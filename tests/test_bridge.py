@@ -68,11 +68,28 @@ class Integration(unittest.IsolatedAsyncioTestCase):
         return result,self.bot.calls[start:]
 
     async def test_inventory_loads_all_upstream_apps_and_schedules(self):
-        self.assertEqual(len(self.bridge.inventory),43)
-        self.assertEqual(sum(len(a['rules']) for a in self.bridge.inventory),109)
+        self.assertEqual(len(self.bridge.inventory),45)
+        self.assertEqual(sum(len(a['rules']) for a in self.bridge.inventory),115)
         self.assertGreaterEqual(self.bridge.jobs,9)
         for app in self.bridge.inventory:
             self.assertTrue(app['rules'])
+
+    async def test_camp_auto_sign_controls_use_worker_local_loader_and_admin_gate(self):
+        config=self.bridge.root/'plugins/GloryOfKings-Plugin/config/config/config.yaml'
+        self.assertEqual(yaml.safe_load(config.read_text())['campSignCron'], '')
+        _,calls=await self.command('#开启王者自动签到',group='987654321')
+        self.assertIn('管理员',json.dumps(calls,ensure_ascii=False))
+        self.assertEqual(yaml.safe_load(config.read_text())['campSignCron'], '')
+        _,calls=await self.command('#开启王者自动签到',user='12345002',master=True)
+        self.assertIn('自动签到已开启',json.dumps(calls,ensure_ascii=False))
+        self.assertEqual(yaml.safe_load(config.read_text())['campSignCron'], '0 30 7 * * *')
+        self.assertIs(yaml.safe_load(config.read_text())['campSignAutoTask'], False)
+        inventory=await self.bridge.request('inventory')
+        sign=next(row for row in inventory if row['file']=='signIn.js')
+        self.assertEqual(sign['tasks'][0]['cron'],'0 30 7 * * *')
+        _,calls=await self.command('#关闭王者自动签到',user='12345002',master=True)
+        self.assertIn('自动签到已关闭',json.dumps(calls,ensure_ascii=False))
+        self.assertEqual(yaml.safe_load(config.read_text())['campSignCron'], '')
 
     async def test_remote_connection_requires_explicit_endpoint_approval(self):
         for command in ('#营地观战连接 https://example.invalid', '#营地消息连接 https://example.invalid'):

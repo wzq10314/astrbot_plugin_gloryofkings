@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 import {fileURLToPath} from 'node:url';
-import {buildHelpButtons, helpButtonRows} from '../engine/help-buttons.mjs';
+import {buildHelpButtons, canonicalHelpCommand, helpButtonRows} from '../engine/help-buttons.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const upstreamFile = path.join(root, 'engine/upstream/apps/help.js');
@@ -34,10 +34,11 @@ const has = (rows, command) => rows.some(button => value(button) === command);
 const privateOwner = {isMaster: true, isGroup: false, msg: '#王者帮助'};
 const publicGroup = {isMaster: false, isGroup: true, msg: '#王者帮助'};
 
-await test('main cards supply all visible main commands and aliases', () => {
+await test('main cards supply all distinct visible commands without duplicate homepage aliases', () => {
   const rows = flat(publicGroup, helpSections);
   for (const section of helpSections.filter(row => !row.ownerOnly)) {
-    for (const item of section.list) for (const command of [item.cmd, ...(item.alias || [])]) {
+    for (const item of section.list) for (const raw of [item.cmd, ...(item.alias || [])]) {
+      const command = canonicalHelpCommand(raw);
       assert.ok(rows.some(button => value(button) === command || value(button).startsWith(command + ' ')), command);
     }
   }
@@ -51,7 +52,8 @@ for (const [key, section] of Object.entries(subHelpSections)) {
     const rows = flat({...privateOwner, msg: '#子帮助'}, [section]);
     for (const item of section.list) {
       if (!item.cmd.startsWith('#')) continue;
-      for (const command of [item.cmd, ...(item.alias || [])]) {
+      for (const raw of [item.cmd, ...(item.alias || [])]) {
+        const command = canonicalHelpCommand(raw);
         if (command === '#查询N战绩') {
           assert.ok(has(rows, '#查询[账号序号]战绩 [对局序号]')); continue;
         }
@@ -69,6 +71,49 @@ await test('distinct actions stored as aliases remain separate buttons', () => {
   for (const command of ['#关闭日报推送', '#关闭周报推送', '#关闭月报推送',
     '#关闭群日报推送', '#关闭群周报推送', '#关闭群月报推送',
     '#关闭皮肤上新推送', '#关闭王者公告推送']) assert.ok(has(rows, command), command);
+});
+await test('homepage synonyms produce one button per action without losing optional slot arguments', () => {
+  const rows = flat(publicGroup, helpSections);
+  for (const command of ['#王者主页', '#全部王者主页']) {
+    assert.equal(rows.filter(button => button.callback === command).length, 1, command);
+  }
+  for (const command of ['#王者卡片', '#王者信息', '#全部主页']) assert.ok(!has(rows, command), command);
+  const standaloneAliases = flat(publicGroup, [{list: [
+    {cmd: '#王者卡片', args: '[序号/营地ID]'},
+    {cmd: '#王者信息', args: '[序号/营地ID]'},
+    {cmd: '#全部主页'}, {cmd: '#全部王者信息'},
+  ]}]);
+  assert.deepEqual(standaloneAliases.map(value), ['#王者主页', '#全部王者主页']);
+  const fixedSlots = flat(publicGroup, [{list: [
+    {cmd: '#王者卡片', args: '2'}, {cmd: '#王者信息', args: '3'},
+    {cmd: '#王者主页', args: '2'},
+  ]}]);
+  assert.deepEqual(fixedSlots.map(value), ['#王者主页 2', '#王者主页 3']);
+});
+await test('all original homepage aliases and account-slot routes remain callable', () => {
+  const file = path.join(root, 'engine/upstream/apps/myKingHomepage.js');
+  const bytes = fs.readFileSync(file);
+  const homepageSource = bytes.toString('utf8').replace(/^import .*$/gm, '')
+    .replace('export class MyKingHomepage', 'class MyKingHomepage')
+    + '\nglobalThis.homepageFixture = MyKingHomepage;';
+  const homepageContext = vm.createContext({
+    plugin: class {constructor(options) {Object.assign(this, options);}},
+    AT_HEAD: '^', AT_TAIL: '$',
+  });
+  vm.runInContext(homepageSource, homepageContext, {filename: file});
+  const homepage = new homepageContext.homepageFixture();
+  for (const command of ['#王者主页', '#王者卡片', '#王者信息']) {
+    for (const suffix of ['', '2', ' 3', ' 361897277']) {
+      const rule = homepage.rule.find(item => new RegExp(item.reg).test(command + suffix));
+      assert.equal(rule?.fnc, 'myKingHomepage', command + suffix);
+    }
+  }
+  for (const command of ['#全部王者主页', '#全部主页', '#全部卡片', '#全部信息',
+    '#全部王者卡片', '#全部王者信息']) {
+    const rule = homepage.rule.find(item => new RegExp(item.reg).test(command));
+    assert.equal(rule?.fnc, 'allKingHomepage', command);
+  }
+  assert.deepEqual(fs.readFileSync(file), bytes);
 });
 await test('watch fixed actions are executable and parameters remain editable', () => {
   const rows = flat(publicGroup, [subHelpSections.watch]);

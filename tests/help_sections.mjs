@@ -84,7 +84,7 @@ function rendered(outcome, mode) {
     assert.equal(outcome.errors.length, 1);
     assert.deepEqual([...text.matchAll(/^【(.+)】$/gm)].map(match => match[1]), titles(data.sections));
     const expected = data.sections.flatMap(section => section.list.map(item =>
-      `${item.cmd}${item.args ? ` ${item.args}` : ''} —— ${item.desc}`));
+      `${item.cmd}${item.args ? ` ${item.args}` : ''}${item.alias?.length ? `（也可发 ${item.alias.join(' / ')}）` : ''} —— ${item.desc}`));
     assert.deepEqual(text.split('\n').filter(line => line.includes(' —— ')), expected,
       'Text fallback must include every visible command, its arguments and explanation');
   }
@@ -97,7 +97,7 @@ const subhelps = [
   {entry: '#英雄相关帮助', aliases: ['#英雄帮助'], title: '英雄相关', first: '#英雄详情', last: '#称号墙', count: 7},
   {entry: '#皮肤帮助', title: '皮肤', first: '#查皮肤', last: '#缺皮肤', count: 5},
   {entry: '#营地ID共享帮助', aliases: ['#营地共享帮助', '#营地id共享帮助'], title: '营地ID共享', first: '#开启营地ID共享', last: '#同步营地ID共享', count: 4},
-  {entry: '#营地观战帮助', aliases: ['#观战帮助'], title: '营地观战', first: '#营地观战', last: '#营地开播', count: 12,
+  {entry: '#营地观战帮助', aliases: ['#观战帮助'], title: '营地观战', first: '#营地观战', last: '#营地观战', count: 14,
     privateCommands: ['#营地观战连接', '#营地观战接入', '#营地观战部署', '#营地观战服务']},
   {entry: '#营地消息帮助', title: '营地消息', first: '引用那条推送回一句', last: '#营地消息关', count: 7,
     privateCommands: ['#营地消息连接', '#营地消息接入', '#营地消息部署', '#营地消息服务', '#营地消息同步']},
@@ -142,7 +142,7 @@ for (const context of contexts) for (const mode of modes) {
 }
 
 await test('main help offers eight entry points without expanding their detailed commands', async () => {
-  assert.deepEqual(expectedPublic.map(section => section.list.length), [6, 6, 2, 2, 3, 2]);
+  assert.deepEqual(expectedPublic.map(section => section.list.length), [10, 6, 2, 2, 5, 2]);
   const entries = expectedPublic.flatMap(section => section.list.map(item => item.cmd)).filter(command => command.endsWith('帮助'));
   assert.deepEqual(entries, subhelps.map(section => section.entry));
   const commands = allCommands(expectedPublic);

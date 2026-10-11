@@ -53,6 +53,15 @@ export function ownerOf (campUserId) {
   }
 }
 
+/**
+ * 营地**官方通知账号** —— 活动红点 / 系统提示（`campEventMsg`）的发信人，不是真人好友。
+ *
+ * ⚠️ 服务端（`server-im/camp-im-server.js`）在解析阶段就挡掉了这批，插件端再兜一层是因为：
+ *    **用户跑的营地消息服务可能是别人部署的旧版**，那边没这道过滤的话，
+ *    插件端不认就照样会把「您有未领取的任务奖励」这类推成好友私信（2026-10-10 实测）。
+ */
+const OFFICIAL_SENDER_ID = '1001'
+
 /** 昵称/角色名截断，防刷屏 */
 function clip (s, n = 20) {
   const t = String(s || '').trim()
@@ -71,7 +80,12 @@ function clip (s, n = 20) {
  */
 function buildContent (msg) {
   // ⭐ 只留角色名（游戏里的名字），不带营地账号昵称 —— 两个名字摆一起反而看不清谁是谁
-  const title = clip(msg.fromRoleName, 16) || clip(msg.fromUserId, 12)
+  // ⭐ 名字的回落链：**游戏角色名 → 营地昵称 → 营地号**。
+  //    中间那层是给**离线补拉**的消息兜的：营地那个接口只保证收件人那侧
+  //    `toUserInfo` 带完整角色信息，发件人 `fromUserInfo` 常常是
+  //    `roleName:''` + `nickname:'营地昵称'`（2026-10-10 实测样本），
+  //    少了这一层，补拉回来的消息标题会显示成一串营地号，认不出是谁发的。
+  const title = clip(msg.fromRoleName, 16) || clip(msg.nickname, 16) || clip(msg.fromUserId, 12)
   const body = msg.text || '（空消息）'
 
   // ⚠️ 图下这一行是**引用回复的暗号**：`📩` 是 tryQuote 的识别标志、营地号是 missCamp 锚点、
@@ -135,6 +149,9 @@ async function renderCard (card) {
  * @returns {Promise<{ok:boolean, reason?:string, to?:string}>}
  */
 export async function pushToOwner (msg, { bot } = {}) {
+  // 官方通知账号（活动红点等）不进私信 —— 服务端新版已挡，这里兜旧版服务端，见上
+  if (String(msg?.fromUserId || '') === OFFICIAL_SENDER_ID) return { ok: false, reason: 'official_sender' }
+
   const owner = ownerOf(msg.selfUserId)
   if (!owner) return { ok: false, reason: 'no_owner' }   // 无归属 → 按约定不管
 

@@ -63,6 +63,13 @@ const CODE_SUCCESS = 0
 const CODE_RATE_LIMITED = -30107
 
 /**
+ * 福利中心任务的 `gameId`：**50001 是营地自己**，不是王者的 20001。
+ * 单独一个常量是因为它要同时进 body 和请求头（少一处就回「服务繁忙」），
+ * 两边必须是同一个值。语义与取值来源见 `utils/campTask.js` 的 `CAMP_GAME_ID`。
+ */
+const CAMP_TASK_GAME_ID = '50001'
+
+/**
  * 营地确定性「账号登录态失效」错误码（实测闲置 29 天的号回的就是它）。
  * 只有这类确定性信号才允许给账号打 authInvalid 标记，见 isDefiniteAuthFailure。
  */
@@ -1311,6 +1318,33 @@ class CampAuthSession {
   }
 
   /**
+   * 只给**指定的那一个**账号，不做轮转。
+   *
+   * 签到这类接口必须用它，两个理由：
+   *   · `candidates()` 是**轮转**的 —— 查 `/operation/action/signinfo` 会读到
+   *     **别的号**的签到状态（5 个号轮流当队首，同一条指令两次结果可能不同）；
+   *   · 签到动作更是直接改状态，拿错号去签等于替别人签。
+   *
+   * 账号不在池里 / 被标失效 / 密钥不全时返回**空数组**，调用方按「没有登录态」处理。
+   *
+   * @param {string} userId 账号池里的 userId（营地ID）
+   * @returns {Array<{auth: object, source: string, label: string}>}
+   */
+  candidatesForAccount (userId) {
+    const wanted = toText(userId)
+    if (!wanted) return []
+
+    const account = authStore.getAccount(wanted)
+    if (!account || account.authInvalid || !isUsableAuth(account)) return []
+
+    return [{
+      auth: this.buildConfig(account, this.#baseConfig()),
+      source: 'global',
+      label: `指定账号 ${account.userId}`
+    }]
+  }
+
+  /**
    * 本轮请求该按什么顺序试哪些账号。
    *
    * （原 `#getAuthCandidates`，被 utils/authStore.js 的注释引用着）
@@ -1775,9 +1809,13 @@ class CampTransport {
    *
    * （原 `#requestWithCandidates`）
    */
-  async requestWithCandidates (method, endpoint, body = null, additionalHeaders = {}, retries = 2, targetUserId = '', requesterBotUserId = '') {
+  async requestWithCandidates (method, endpoint, body = null, additionalHeaders = {}, retries = 2, targetUserId = '', requesterBotUserId = '', options = {}) {
     const url = `${this.#baseUrls.main}${endpoint}`
-    const candidates = this.#auth.candidates(targetUserId, requesterBotUserId)
+    // options.accountId：只发**指定的那一个**账号、不轮转。签到这类
+    // 「状态绑在具体账号上」的接口必须走它，否则会读到 / 改到别的号。
+    const candidates = options.accountId
+      ? this.#auth.candidatesForAccount(options.accountId)
+      : this.#auth.candidates(targetUserId, requesterBotUserId)
 
     if (!candidates.length) {
       throw new AuthConfigError('未找到可用的营地登录态，请先完成营地登录，或在账号池中配置一个可用的全局账号')
@@ -1887,9 +1925,19 @@ class CampTransport {
    *
    * （原 `#requestGameFormWithCandidates`）
    */
-  async gameFormWithCandidates (endpoint, extraFields = {}, targetUserId = '', requesterBotUserId = '', retries = 2) {
+  async gameFormWithCandidates (endpoint, extraFields = {}, targetUserId = '', requesterBotUserId = '', retries = 2, options = {}) {
     const url = `${this.#baseUrls.game}${endpoint}`
-    const candidates = this.#auth.candidates(targetUserId, requesterBotUserId)
+    // options.accountId：只发**指定的那一个**账号、不轮转。和 requestWithCandidates
+    // 那条完全同构 —— 早先只有主站那边加了，游戏侧这条漏了，于是「查 A 号的
+    // 营地币」实际可能是拿 B 号的登录态发的，读回来是 **B 号的余额**
+    // （2026-10-10 实测：裸探针写死账号读 25，走插件读 0）。
+    //
+    // ⚠️ 只给**账号级数据**（余额这种「我的」数据）用它。
+    //    `getGameHeroList` 那种「看谁由参数决定、本来就该用任意登录态去查」的
+    //    接口**不要**传，传了会让「查非好友」失效。
+    const candidates = options.accountId
+      ? this.#auth.candidatesForAccount(options.accountId)
+      : this.#auth.candidates(targetUserId, requesterBotUserId)
 
     if (!candidates.length) {
       throw new AuthConfigError('未找到可用的营地登录态，请先完成营地登录，或在账号池中配置一个可用的全局账号')
@@ -1977,6 +2025,7 @@ class CampTransport {
       }
     })
   }
+
 }
 
 /* ========================================================== 门面 */
@@ -2059,6 +2108,49 @@ class ApiService {
    */
   async #makeAuthRequest (endpoint, body, targetUserId = '', requesterBotUserId = '') {
     return this.#transport.requestWithCandidates('POST', endpoint, body, {}, 2, targetUserId, requesterBotUserId)
+  }
+
+  /* ------------------------------------------------------------ 通用请求门面 */
+
+  /**
+   * 主站（kohcamp.qq.com）POST 接口的公开入口。
+   *
+   * 为什么需要：`requestWithCandidates` 是 `CampTransport` 的私有方法，
+   * 上层（探针、新功能）想试一个还没封装过的路径时，得有一个能用的口子。
+   *
+   * ⚠️ `extraHeaders` 不是可有可无的摆设：营地有一批接口**同一个值要在 body 和
+   *    请求头各出现一次**，只放 body 会回一句看不出原因的 `1:服务繁忙，请稍后再试`
+   *    （2026-10-10 实测 `/operation/action/tasklist`：body 带 `gameId` 仍是 1，
+   *    补上同名请求头才通）。同族的 `getHeroRecordDetails` 也是这个脾气（`serverId`）。
+   *
+   * @param {string} endpoint 路径，如 `/operation/action/tasklist`
+   * @param {object} [body]
+   * @param {string} [targetUserId] 查谁的（不传 = 当前登录态那个号）
+   * @param {string} [accountId] 锁账号用（传了就不轮转）
+   * @param {object} [extraHeaders] 额外请求头（见上面那条注意）
+   * @returns {Promise<object>}
+   */
+  async campRequest (endpoint, body = {}, targetUserId = '', accountId = '', extraHeaders = {}) {
+    return this.#transport.requestWithCandidates(
+      'POST', endpoint, body, extraHeaders, 2, targetUserId, '',
+      accountId ? { accountId } : {}
+    )
+  }
+
+  /**
+   * 游戏侧 form 接口的公开入口（跟 `getCampCoin` 同一条链路）。
+   *
+   * @param {string} endpoint 路径，如 `/play/h5lotteryquery`
+   * @param {object} [extraFields]
+   * @param {string} [targetUserId]
+   * @param {string} [accountId] 锁账号用
+   * @returns {Promise<object>}
+   */
+  async gameFormRequest (endpoint, extraFields = {}, targetUserId = '', accountId = '') {
+    return this.#transport.gameFormWithCandidates(
+      endpoint, extraFields, targetUserId, '', 2,
+      accountId ? { accountId } : {}
+    )
   }
 
   /* ================================================== 一、战绩（对局记录） */
@@ -2181,6 +2273,7 @@ class ApiService {
    * 该接口位于游戏侧域名，使用 form 表单 + token/userId 鉴权，响应不加密。
    * 接口与参数参考自 https://github.com/KimigaiiWuyi/WzryUID
    */
+
   async getSkinList (ID, requesterBotUserId = '') {
     return this.#transport.gameFormWithCandidates('/play/h5getheroskinlist', {
       noCache: '0',
@@ -2293,6 +2386,350 @@ class ApiService {
    */
   async getTvChoiceItems (targetUserId = '', requesterBotUserId = '') {
     return this.#transport.requestWithCandidates('POST', '/info/tv/choiceitem', {}, {}, 2, targetUserId, requesterBotUserId)
+  }
+
+  /* ==================================================== 六、营地签到 */
+
+  /**
+   * 拿一个营地号在游戏里的**角色列表**。
+   *
+   * 签到的 `newsignin` 必须带 `roleId`，而这个值不在登录态里 —— 账号池里所有号的
+   * `gameRoleId` 都是空的（那是「当前选中角色」的缓存，扫码登录时不写）。
+   * 所以每次签到前要现查一次。
+   *
+   * 返回值形状：`{ userId, openid, gameList: [{ gameId, roles: [...] }] }`，
+   * 王者的 gameId 是 `20001`，`roles[]` 里每条含 `roleId` / `roleName` / `areaId` /
+   * `serverId` / `roleDesc`（如「微信安卓 至尊星耀III」）。
+   *
+   * ⚠️ 用**指定的那个账号**发（options.accountId），不能轮转 —— 否则查到的是别人的角色。
+   *
+   * @param {string} userId 账号池里的 userId（营地ID）
+   */
+  async getRoleList (userId) {
+    return this.#transport.requestWithCandidates(
+      'POST', '/game/rolelist', {}, {}, 2, userId, '', { accountId: userId }
+    )
+  }
+
+  /**
+   * 查一个营地号的**签到状态**。
+   *
+   * 返回体（实测 2026-10-10，`data` 部分）：
+   *   · `weekSignMap`   —— **本周签到图**，7 个字符、`'1'` 为已签，**下标 0 = 周一**
+   *                        （2026-10-10 是周六，主人号返回 `'0000010'`，第 6 位=1 ✓）
+   *   · `seqSignDays`   —— 连续签到天数
+   *   · `userTotalSign` —— 累计签到天数
+   *   · `canExtraSign`  —— 可补签次数
+   *   · `weekList`      —— 本周 1~7 天的奖励表（`date` + `gift[]`）
+   *   · `totalList`     —— 累计签到（7 天 / 14 天…）奖励表
+   *   · `redPoint`      —— 红点（`{ text, show, id }`）
+   *
+   * ⚠️ 判「今天签没签」只认 `weekSignMap`。**别用同族的 `/operation/extrasignweekinfo`** ——
+   *    它的 `signMap` 实测恒为 `'0000000'`（主人号当天已签也照样全 0），是另一个口径。
+   *
+   * ⚠️ 用**指定的那个账号**发（options.accountId），不能轮转。
+   *
+   * @param {string} userId 账号池里的 userId（营地ID）
+   */
+  async getCampSignInfo (userId) {
+    return this.#transport.requestWithCandidates(
+      'POST', '/operation/action/signinfo', {}, {}, 2, userId, '', { accountId: userId }
+    )
+  }
+
+  /**
+   * 给一个营地号**签到**。
+   *
+   * ⚠️⚠️ `roleId` 是**必需**的，不带它服务端回的是那句骗人的
+   *    `-105204 未授权营地，请前往游戏修改授权设置后重试` —— 看着像权限问题，
+   *    实际是**缺参数**（2026-10-10 实测：body 里只补一个 `roleId` 就变成
+   *    `-105203 请勿重复签到`，参数就齐了）。别被那句文案带去查授权设置。
+   *
+   * 实测确认**只有 body 里的 `roleId` 管用**，这些通通不算数（都回 -105204）：
+   *   body 里的 `gameRoleId` / `areaId` / `serverId` / `gameAreaId` / `gameServerId`；
+   *   请求头里的 `gameroleid` / `gameserverid` / `gameareaid`；
+   *   以及 `type` / `signType` / `source` / `userId` / `gameId` 等猜测参数。
+   *
+   * 返回码：
+   *   · `0`        签到成功，`data` 里是奖励（`giftList[]` / `signDate` / `seqSignDays` / `totalSignDays`）
+   *   · `-105203`  今天已经签过了（**不是错误**，调用方要按「已签」而不是「失败」处理）
+   *   · `-105206`  操作太频繁，歇几秒再试
+   *   · `-105204`  roleId 没传对（见上）
+   *
+   * `retries` 传 **0**：签到是**写操作**，重试等于连签两次，只会撞 -105206。
+   *
+   * @param {string} userId 账号池里的 userId（营地ID）
+   * @param {string|number} roleId 该账号在游戏里的角色ID（来自 getRoleList）
+   */
+  async doCampSign (userId, roleId) {
+    const role = toText(roleId)
+
+    // ⚠️ roleId 为空时**整个字段都不发**，不能发 `{"roleId":""}`（2026-10-10 实测）：
+    //    body = `{}`            → `-105204 未授权营地`（服务端认「缺字段」）
+    //    body = `{"roleId":""}` → `1 服务繁忙，请稍后再试`（认「字段值非法」）
+    //    两者结果不一样，说明 -105204 的判据是「这个键不存在」。空串漏出去的话，
+    //    用户看到的是「服务繁忙」这种看不出原因的码，比「未授权营地」更难查。
+    const body = role ? { roleId: role } : {}
+
+    return this.#transport.requestWithCandidates(
+      'POST', '/operation/action/newsignin', body, {},
+      0, userId, '', { accountId: userId }
+    )
+  }
+
+  /**
+   * 查一个营地号的**福利中心任务列表**（`/operation/action/tasklist`）。
+   *
+   * ⚠️⚠️ **路径里那段 `action` 不能漏**：`/operation/tasklist` 实测回
+   *    `returnCode 12`，而 12 的真身是 trpc 的「**这个路径没注册**」
+   *    （有的服务会把原文透出来：`rpc name /xxx invalid, current service:
+   *    trpc.camp.userSvr.UserSvr ...`）。所以**看到 12 就是路径写错了**，
+   *    跟「服务繁忙」那句文案没关系，别照着它去查频控或登录态。
+   *
+   * ⚠️⚠️ **`gameId` 要在 body 和请求头各放一次**，少了请求头回
+   *    `returnCode 1:服务繁忙` —— 又是一句会把人带偏的文案。
+   *
+   * ⚠️ **别传空串**：`{gameId:'50001', serverId:'', roleId:''}` 回 `1`，
+   *    把两个空字段去掉就通了（同 `doCampSign` 的 roleId，营地对空串和
+   *    缺字段的处理是两回事）。福利中心任务全是账号级的，不需要角色。
+   *
+   * 返回 `data`：`taskList[]` / `myCurrency`（营地币余额）/ `extra` / `exchangeList`。
+   * 单条任务的字段与状态位解读见 `utils/campTask.js`。
+   *
+   * @param {string} userId 账号池里的 userId（营地ID）
+   */
+  /* --------------------------------------- 福利中心的「做任务」动作（浏览/点赞） */
+
+  /**
+   * 取一条**营地资讯流**（`/info/followinfo`），从中挑出可用的资讯 ID。
+   *
+   * 为什么需要它：福利中心的「浏览资讯」「点赞」两个任务，完成判据在**服务端** ——
+   * 必须真的读一篇资讯 / 真的点一个赞，任务才会变 `finishStatus=1`。
+   * 实测（2026-10-10）：`/play/gettaskconditiondata`（type=5 / 11）返回 `rc=0`
+   * **但不改任务状态**，它只是埋点上报，别指望它。
+   *
+   * 返回 `data.list[]`，其中 `type === 14` 的是资讯卡，卡里 `infoContent.infoId`
+   * 就是 `/info/detailinfo` 要的 `iInfoId`（见 `utils/campTask.js` 的 `pickInfoId`）。
+   *
+   * ⚠️ 走**主站/trpc 网关** —— `/info/*` 在老网关（gameForm 那条）上是 `404 Not Found`。
+   *
+   * @param {string} userId 账号池里的 userId（营地ID）
+   */
+  async getInfoFeed (userId) {
+    const id = toText(userId)
+
+    return this.#transport.requestWithCandidates(
+      'POST', '/info/followinfo', {}, {}, 2, id, '', { accountId: id }
+    )
+  }
+
+  /**
+   * **浏览**一篇资讯（`/info/detailinfo`）—— 福利中心「浏览资讯」任务的完成动作。
+   *
+   * 实测（2026-10-10，主人号）：
+   *   · 调用前 「浏览资讯」`[0/1] finishStatus=0`
+   *   · 调用后 「浏览资讯」`[1/1] finishStatus=1` ✓（之后 `rewardtask` 领到 25 币）
+   *
+   * `iInfoId` 必须**真实有效** —— 编一个会回 `-115407 无效的资讯`；
+   * ID 从 `getInfoFeed()` 现取，别写死（资讯会下架）。
+   *
+   * ⚠️ **读操作**，没有对外副作用，可以放心自动做。
+   *
+   * @param {string} userId 账号池里的 userId（营地ID）
+   * @param {string|number} iInfoId 资讯 ID
+   */
+  async viewCampInfo (userId, iInfoId) {
+    const id = toText(userId)
+
+    return this.#transport.requestWithCandidates(
+      'POST', '/info/detailinfo', { iInfoId: toText(iInfoId) }, {}, 2, id, '', { accountId: id }
+    )
+  }
+
+  /**
+   * 给一篇资讯**点赞**（`/info/addlike`）—— 福利中心「点赞」任务的完成动作。
+   *
+   * 实测（2026-10-10，主人号）：调用后「点赞」`[0/1] → [1/1] finishStatus=1` ✓。
+   * 返回 `{ like, dislike, likeNum, dislikeNum }`。
+   *
+   * ⚠️⚠️ **这是写操作，而且是「替你给别人的内容点赞」** —— 跟浏览不一样，
+   *    它会在营地上留下一个真实的社交动作。所以：
+   *    · `retries` 传 **0**（重试 = 反复点赞）
+   *    · 上层要**可关**（`config.campSignAutoTask`），别做成没法拒绝的默认行为
+   *    · **只对未完成的任务做**：靠 `finishStatus` 判，不是每轮无脑点
+   *
+   * ⚠️ 同一个 ID 再点一次会不会变成「取消赞」**没验证过** —— 调用方必须自己
+   *    保证幂等（这正是上面那条「看 finishStatus」的由来）。
+   *
+   * @param {string} userId 账号池里的 userId（营地ID）
+   * @param {string|number} iInfoId 资讯 ID
+   */
+  async likeCampInfo (userId, iInfoId) {
+    const id = toText(userId)
+
+    return this.#transport.requestWithCandidates(
+      'POST', '/info/addlike', { iInfoId: toText(iInfoId) }, {}, 0, id, '', { accountId: id }
+    )
+  }
+
+  /**
+   * **上报一个任务条件**（`/play/gettaskconditiondata`）。
+   *
+   * ⚠️⚠️ **这个口只对「分享」这类服务端验证不了的行为有效，别拿它当万能的完成口**：
+   *
+   * | type | 含义 | 上报后任务会完成吗 |
+   * |---|---|---|
+   * | **1** | 分享 | ✅ **会**（实测：分享任务 `finishStatus` 0→1） |
+   * | 9 | 分享给好友 | ❌ 不会（实测不变） |
+   * | 5 | 点击资讯tab | ❌ 不会（实测不变） |
+   * | 11 | 浏览历史 | ❌ 不会（实测不变） |
+   *
+   * 道理是：**浏览和点赞服务端能自己验证**（有没有真读过那篇资讯、有没有真点过赞），
+   * 所以只认真实行为，上报没用；**分享在客户端侧（调起微信/QQ）服务端收不到回调**，
+   * 只能认这个上报 —— 这也正是「分享任务不用真分享」的由来。
+   *
+   * ⚠️ 走**老网关的 form 链路**（`gameFormWithCandidates`），不是主站那条：
+   *    主站打这个路径回 `returnCode 12`（路径不在该网关上）。
+   *
+   * @param {string} userId 账号池里的 userId（营地ID）
+   * @param {number} type 条件类型，目前只有 `1`（分享）有意义
+   */
+  async reportTaskCondition (userId, type) {
+    const id = toText(userId)
+
+    return this.#transport.gameFormWithCandidates(
+      '/play/gettaskconditiondata', { type: Number(type) }, id, '', 0, { accountId: id }
+    )
+  }
+
+  async getCampTaskList (userId) {
+    const id = toText(userId)
+
+    return this.#transport.requestWithCandidates(
+      'POST', '/operation/action/tasklist', { gameId: CAMP_TASK_GAME_ID }, { gameId: CAMP_TASK_GAME_ID },
+      2, id, '', { accountId: id }
+    )
+  }
+
+  /**
+   * **领取**福利中心已完成任务的奖励（`/operation/action/rewardtask`）。
+   *
+   * 这是「签到了但营地币没到账」的那一步：`newsignin` 只把任务做了
+   * （`finishStatus=1`），奖励得再领一次才进账（实测领完 `packageStatus` 0→1、
+   * 余额 25→50，`/play/h5lotteryquery` 同步变化 ✓）。
+   *
+   * ⚠️ `retries` 传 **0**：领取是**写操作**，重试等于重复领。服务端虽然会拦，
+   *    但白吃请求、还往频控上撞（同 `doCampSign` 的理由）。
+   *
+   * ⚠️ body 形态跟 `gameId` 绑定，见 `utils/campTask.js` 的 `rewardBody`。
+   *
+   * @param {string} userId 账号池里的 userId（营地ID）
+   * @param {object} body `rewardBody()` 造出来的 `{ taskIds, mRoleIds }`
+   */
+  async claimCampTasks (userId, body) {
+    const id = toText(userId)
+
+    return this.#transport.requestWithCandidates(
+      'POST', '/operation/action/rewardtask', body, { gameId: CAMP_TASK_GAME_ID },
+      0, id, '', { accountId: id }
+    )
+  }
+
+  /**
+   * **用营地币兑换**（`/operation/lotterygetgift`）。
+   *
+   * ⚠️⚠️ 这是**花钱且不可逆**的写操作 —— 调用方必须自己做好二次确认，
+   *    不要在任何自动流程（签到、定时任务）里调它。
+   *
+   * ⚠️ `retries` 传 **0**：重试等于重复兑换、重复扣币。
+   *
+   * 早先 `apps/campCoin.js` 的注释断言「下单兑换做不到、只能走 WebView JS 桥」，
+   * **那是错的** —— 当时试的是 `/play/h5lotterygetgift`（名字像，但参数乱填都回 0，
+   * 根本不是下单口）。真正的兑换口在 `/operation/` 下，参数形态见
+   * `utils/campExchange.js` 的 `exchangeBody`。
+   *
+   * 业务码（实测）：
+   *   · `0`           兑换成功
+   *   · `-10530338`   营地币不足（**参数全对**才会走到这一步）
+   *   · `-105223`     缺 `gameId`，或这件商品不吃这个口（营地自家的 50001 恒定这个）
+   *   · `-10520011`   商品的 gameId 和传进来的对不上
+   *
+   * @param {string} userId 账号池里的 userId（营地ID）
+   * @param {object} body `exchangeBody()` 造出来的请求体
+   */
+  async exchangeCampGift (userId, body) {
+    const id = toText(userId)
+
+    return this.#transport.requestWithCandidates(
+      'POST', '/operation/lotterygetgift', body, {},
+      0, id, '', { accountId: id }
+    )
+  }
+
+  /**
+   * 拉**营地币兑换**的完整商品表（`/operation/lotteryquery`）。
+   *
+   * ⚠️⚠️ **必须带 `{ gameId:'20001', type:'exchange' }`** —— 少了 `type`，
+   *    `data.exchangeInfo` 恒为 `null`，会被误判成「现在没有兑换活动」。
+   *    实际上有 19 件商品挂着（2026-10-11 实测）。
+   *
+   * ⚠️ 别拿 `/operation/action/tasklist` 里那份 `exchangeList` 当商品表 ——
+   *    它只有 6 件，是**残缺的子集**（早先就被它误导过，以为「营地币只能换这么点」）。
+   *    真正的清单只在这个接口的 `exchangeInfo.giftList` 里。
+   *
+   * 返回 `data`：`userCurrencyCnt`（余额）/ `exchangeInfo.giftList[]`（商品）
+   * / `exchangeInfo.endTime`（活动截止）/ `ruleText`（规则文案）。
+   * 单条商品的字段解读见 `utils/campExchange.js`。
+   *
+   * @param {string} userId 账号池里的 userId（营地ID）
+   */
+  async getCampExchange (userId) {
+    const id = toText(userId)
+
+    const res = await this.#transport.requestWithCandidates(
+      'POST', '/operation/lotteryquery', { gameId: '20001', type: 'exchange' }, {},
+      2, id, '', { accountId: id }
+    )
+
+    // ⚠️⚠️ **这个端点不套 `data`** —— 实测（2026-10-11）它把
+    //    `serverTime` / `exchangeInfo` / `userCurrencyCnt` 直接摊在响应顶层，
+    //    而同一族的 `/operation/action/tasklist`、以及 form 那条 `h5lotteryquery`
+    //    **都是套 `data` 的**。调用方按惯例写 `res.data` 就会拿到 `undefined`，
+    //    表现成「**现在没有可兑换的东西**」这种看起来像「活动没开」的假象。
+    //    这里统一补一层 `data`，让两条路的手感一致 —— 别让调用方去猜形状。
+    return { ...res, data: res?.data ?? res }
+  }
+
+  /**
+   * 查**营地币余额**。
+   *
+   * 端点本身叫 `h5lotteryquery`（抽奖查询），但实测（2026-10-10）它一次给全：
+   *   · `data.userCurrencyCnt` —— **营地币余额**（签到给的也是营地币，
+   *     主人号当天签到拿 25 枚，这里读出来正是 25 ✓）
+   *   · `data.exchangeInfo`   —— 兑换活动信息，**没活动时是 `null`**
+   *   · `data.exchangeBanners` —— 兑换横幅，没活动时是 `[]`
+   *   · `data.gamesList`      —— 参与的游戏（王者是 `20001`）
+   *   · `data.lotteryInfo`    —— 抽奖信息，没活动时是 `null`
+   *
+   * ⚠️ 走**游戏侧** form 网关（`baseUrls.game`），不是主站 —— 主站打这个路径
+   *    是 `404 Route Not Found`。
+   * ⚠️ `exchangeInfo` 为 null **不代表接口坏了**，是「当前没有兑换活动」。
+   *    上层要按「没活动」展示，别报成错误。
+   *
+   * @param {string} targetUserId 用哪个账号查（营地池里的 userId）
+   * @param {string} requesterBotUserId 发起查询的机器人用户 ID
+   */
+  async getCampCoin (targetUserId = '', requesterBotUserId = '') {
+    const userId = toText(targetUserId)
+
+    // ⚠️⚠️ 必须传 `options.accountId`（不轮转）。余额是**账号级**的数据，
+    //    而 `gameFormWithCandidates` 默认会按全局账号轮转 ——
+    //    不锁账号的话，「查 A 号的营地币」会拿 B 号的登录态发出去，
+    //    读回来的是 **B 号的余额**（2026-10-10 实测：同一个号，
+    //    裸探针写死账号读 25、走插件读 0，就是这个原因）。
+    return this.#transport.gameFormWithCandidates(
+      '/play/h5lotteryquery', {}, userId, requesterBotUserId, 2, { accountId: userId }
+    )
   }
 
   /**

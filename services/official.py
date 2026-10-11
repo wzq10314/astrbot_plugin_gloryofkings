@@ -178,6 +178,11 @@ class OfficialBridge(Bridge):
         if not parts:
             return {}
         chain = MessageChain(chain=parts)
+        message = data.get('message')
+        if isinstance(message, dict) and message.get('type') == 'forward':
+            # QQ Markdown fetches every image in one card together. Multi-page
+            # skin walls use one published image per owner-bound result page.
+            chain.qqofficial_image_pages = True
         if buttons:
             chain.qqofficial_buttons = buttons
         row = self.events.get(data.get('event_ref'))

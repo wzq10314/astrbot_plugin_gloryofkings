@@ -8,6 +8,9 @@ import authStore from './utils/authStore.js'
 import { getAccountSwitches, setAccountEnabled, invalidate, pruneAccounts } from './utils/campImStore.js'
 import { ownerOf } from './utils/campImPush.js'
 import { listMasterQQ } from './utils/masterMsg.js'
+// 「刚开启自动签到 → 当场签一次」用。⚠️ 用具名导入（本文件顶部的注释解释过：
+// 锅巴用带 query 的动态 import 加载本文件，命名空间导入会整个 support 载入失败）
+import { currentCampSignInstance } from './apps/signIn.js'
 // 锅巴面板打开时，把「接入那一刻写进配置、但面板还显示为空」的那几格补齐
 import { fillDefaultShareUrl, migrateLegacyShareToken } from './utils/shareDefaults.js'
 
@@ -136,7 +139,7 @@ function getCampImSnapshot () {
   //    不代表它要挂 ws 收消息。早先这里把池子里的号全列出来、默认开，
   //    账号一多就没法管（2026-09-20 主人指出）。
   //    想加号：去侧边栏「营地消息」页面，那儿有「可以加进来的号」。
-  // ⚠️ 再 filter 一道兜底（同 guoba/index.js 的理由）：宁可少列，
+  // ⚠️ 再 filter 一道兜底（同 webadapter/index.js 的理由）：宁可少列，
   //    也不能把池子里没有的号显示成「在收消息」
   const accounts = Object.keys(switches)
     .filter(uid => infoOf.has(String(uid)))
@@ -207,21 +210,30 @@ export function supportGuoba () {
         {
           field: 'config.onlineReminder',
           label: '推送总开关',
-          bottomHelpMessage: '战绩推送 / 开局提醒 / 上下线提醒的总开关。打开后用户还需各自在群里发送 #开启战绩推送 或 #开启上下线提醒 订阅，只有订阅过的人会被轮询。打完一局推送的是和 #查询战绩N 同一张全场详情图。三条播报（打完 / 开局 / 上下线）都不 @ 本人，玩家名写在文案里，群里照样认得出是谁。',
+          bottomHelpMessage: '战绩推送、开局提醒、上下线提醒的总开关。用户还要各自发 #开启战绩推送 订阅。',
           component: 'Switch'
         },
         {
           field: 'config.quoteReply',
           label: '引用触发消息',
-          bottomHelpMessage: '默认开启。开启时回复会引用触发指令那条消息；关闭后直接发送，不带引用。',
+          bottomHelpMessage: '开启后回复会引用触发指令那条消息。',
           component: 'Switch'
         },
         {
           field: 'config.masterNotify',
           label: '主人通知收件人',
-          bottomHelpMessage: '插件私聊主人的运维提醒（全局账号登录态失效、账号被营地限流、营地消息推不出去、保活结果、共享库接入提醒）默认只发给第一个主人，不会群发所有主人。想换人或几个人一起收，在这里勾（可多选）。留空 = 只发第一个主人。勾了的人被移出主人列表时会自动回落到第一个主人，不会把提醒静默丢掉。',
-          component: 'GTags',
+          bottomHelpMessage: '运维提醒（登录态失效、被限流、保活结果等）发给谁。留空 = 只发第一个主人。',
+          // ⚠️ 用 `Select` 而不是 `GTags`（2026-10-06 修）：锅巴把 GTags 归进
+          //    BLOCK_COMPONENTS（「整行大组件」），label 会改成**竖排**、说明文字
+          //    （bottomHelpMessage）跟着顶到表单最左边 —— 实测左边缘 24px，
+          //    而别的项是 184px（让开 label 的 160px），这一段明显突出来一截。
+          //    而 GTags 在**有 options 时内部渲染的就是这个 Select**
+          //    （mode="multiple"），所以换过来行为完全一样，只是 label 回了横排、
+          //    宽度也跟着回到表单统一的 900px（GTags 自己另写了 560px 上限）。
+          component: 'Select',
           componentProps: {
+            mode: 'multiple',
+            allowClear: true,
             options: masterOptions,
             placeholder: '留空 = 只发给第一个主人'
           }
@@ -229,7 +241,7 @@ export function supportGuoba () {
         {
           field: 'config.battleResultCron',
           label: '推送检查间隔',
-          bottomHelpMessage: '战绩推送、开局提醒、上下线提醒共用这一个轮询，这里定的是「最快多久看一次」。每个订阅串行拉接口（间隔 800 毫秒）；真打完一局时会再拉一次详情并渲染图（约 1.3 秒）。玩家离线时实际间隔会按下面的退避倍数自动拉长，不会一直按这个频率打接口。设太短仍会触发营地频控 -30107，不建议低于 2 分钟。',
+          bottomHelpMessage: '多久查一次战绩。太快会被营地限流，不建议低于 2 分钟。',
           helpMessage: '修改后重启生效',
           component: 'EasyCron',
           componentProps: {
@@ -239,7 +251,7 @@ export function supportGuoba () {
         {
           field: 'config.idleBackoffMax',
           label: '离线退避倍数',
-          bottomHelpMessage: '玩家离线时把检查间隔拉长到几倍上面的轮询间隔。离线的号既不会开局也不会出新战绩，照高频查纯属白耗配额、更容易撞上 -30107。默认 5，即 2 分钟的间隔在离线满 3 小时后退到 10 分钟一次（不活跃 1 小时内 2 倍、1~3 小时 3 倍）。代价是上线播报最坏晚这么久，期间「上线又下线」的短会话可能整段漏掉。填 1 = 关闭自适应，恒定按上面的间隔轮询。',
+          bottomHelpMessage: '玩家离线时把检查间隔拉长几倍。填 1 = 不拉长。',
           component: 'InputNumber',
           componentProps: {
             placeholder: '默认 5'
@@ -248,7 +260,7 @@ export function supportGuoba () {
         {
           field: 'config.dailyReportCron',
           label: '战绩日报推送时间',
-          bottomHelpMessage: '每天到点给订阅者发一张当日战绩总结图（#开启日报推送 订阅）。数据读的是本地归档，正常不额外请求营地接口。当天没有对局就不推送。留空 = 关掉自动推送，只保留 #王者日报 指令。',
+          bottomHelpMessage: '每天到点给订阅者发一张当日战绩总结图。留空 = 不自动推。',
           helpMessage: '修改后重启生效',
           component: 'EasyCron',
           componentProps: {
@@ -258,7 +270,7 @@ export function supportGuoba () {
         {
           field: 'config.weeklyReportCron',
           label: '战绩周报推送时间',
-          bottomHelpMessage: '同上，按「本周（周一 00:00 起）」汇总，默认周日晚推送。首次推送时本地归档可能还不全，图上会标明数据覆盖到哪天。',
+          bottomHelpMessage: '同上，按本周（周一起）汇总。',
           helpMessage: '修改后重启生效',
           component: 'EasyCron',
           componentProps: {
@@ -268,7 +280,7 @@ export function supportGuoba () {
         {
           field: 'config.monthlyReportCron',
           label: '战绩月报推送时间',
-          bottomHelpMessage: '同上，按「本月（1 号 00:00 起）」汇总。cron 没法表达「每月最后一天」（各月天数不同），所以默认写成 28-31 号每晚触发，插件只在真正的月末那天推，不会连推四天。本地归档保留 35 天，刚好够一个月。',
+          bottomHelpMessage: '同上，按本月（1 号起）汇总，只在真正的月末那天推。',
           helpMessage: '修改后重启生效',
           component: 'EasyCron',
           componentProps: {
@@ -278,7 +290,7 @@ export function supportGuoba () {
         {
           field: 'config.groupDailyReportCron',
           label: '群日报推送时间',
-          bottomHelpMessage: '给开过 #开启群日报推送 的群发一张全群战绩排行榜。和个人日报不同，群报要逐个扫本群绑定营地ID的成员，每人至少一次营地请求（最多 25 个活跃账号，约 30 秒），所以默认时间和个人日报错开。全群当天没人打就不推送。留空 = 关掉自动推送，只保留 #群日报 指令。',
+          bottomHelpMessage: '给开过 #开启群日报推送 的群发全群战绩排行。留空 = 不自动推。',
           helpMessage: '修改后重启生效',
           component: 'EasyCron',
           componentProps: {
@@ -288,7 +300,7 @@ export function supportGuoba () {
         {
           field: 'config.groupWeeklyReportCron',
           label: '群周报推送时间',
-          bottomHelpMessage: '同上，按「本周（周一 00:00 起）」汇总全群。',
+          bottomHelpMessage: '同上，按本周（周一起）汇总全群。',
           helpMessage: '修改后重启生效',
           component: 'EasyCron',
           componentProps: {
@@ -298,7 +310,7 @@ export function supportGuoba () {
         {
           field: 'config.groupMonthlyReportCron',
           label: '群月报推送时间',
-          bottomHelpMessage: '同上，按「本月（1 号 00:00 起）」汇总全群。和个人月报一样是 28-31 号触发、只在真正的月末那天推。',
+          bottomHelpMessage: '同上，按本月（1 号起）汇总全群。',
           helpMessage: '修改后重启生效',
           component: 'EasyCron',
           componentProps: {
@@ -312,7 +324,7 @@ export function supportGuoba () {
         {
           field: 'config.distUrl',
           label: '分发服务地址',
-          bottomHelpMessage: '观战和营地消息的服务端代码从主人服务器上的「分发服务」下载（默认端口 6868），不再从 git 仓库拉。装观战/消息时发 #营地观战接入 <地址> <令牌> 会自动写这里。留空 = 还没接入，进群 972915804 找主人要。',
+          bottomHelpMessage: '观战和营地消息的服务端从这里下载。留空 = 还没接入，进群 972915804 找主人要。',
           component: 'Input',
           componentProps: {
             placeholder: 'http://你的域名:6868'
@@ -322,10 +334,7 @@ export function supportGuoba () {
           field: 'config.distToken',
           label: '接入令牌',
           bottomHelpMessage:
-            '主人签发的令牌，**观战 / 营地消息 / 共享库 三套共用这一个** —— ' +
-            '主人签发时是「代共享库签」的，所以一个值三边都认，不用分别填。' +
-            '⚠️ 是凭证，等同密码，别往群里贴、也别把带它的配置截图发出去。' +
-            '等价指令：#营地共享库令牌 <令牌>。',
+            '观战、营地消息、共享库三套共用这一个。是凭证，别往群里贴。',
           component: 'Input',
           componentProps: {
             placeholder: 'gok_1_xxxxxxxx'
@@ -334,7 +343,7 @@ export function supportGuoba () {
         {
           field: 'config.dependencyRegistry',
           label: '依赖 npm 镜像',
-          bottomHelpMessage: '接入观战/营地消息时自动安装缺失依赖，默认使用国内 npm 镜像；留空也会使用默认镜像。',
+          bottomHelpMessage: '装观战/营地消息的依赖时用哪个 npm 镜像。',
           component: 'Input',
           componentProps: {
             placeholder: 'https://registry.npmmirror.com'
@@ -343,7 +352,7 @@ export function supportGuoba () {
         {
           field: 'config.dependencyProxy',
           label: '依赖安装代理',
-          bottomHelpMessage: '外网安装依赖时使用的 HTTP(S) 代理，例如 http://127.0.0.1:7890；不需要就留空。',
+          bottomHelpMessage: '装依赖时走的 HTTP 代理，不需要就留空。',
           component: 'Input',
           componentProps: {
             placeholder: 'http://127.0.0.1:7890'
@@ -353,12 +362,7 @@ export function supportGuoba () {
           field: 'config.ffmpegPath',
           label: 'ffmpeg 路径',
           bottomHelpMessage:
-            '留空 = 自动找（先查系统 PATH，再扫常见安装目录）。' +
-            '⚠️ 自动找认不出所有装法，提示「没找到 ffmpeg」时就手填这里。' +
-            '先确认它真的能跑：终端里执行 ffmpeg -version，有版本号就说明装了；' +
-            '再执行 where ffmpeg（Windows）或 which ffmpeg（Linux/macOS），把输出的那行完整路径填进来。' +
-            'Windows 形如 D:\\ffmpeg\\bin\\ffmpeg.exe，Linux/macOS 形如 /usr/local/bin/ffmpeg。' +
-            '填了就只认这个路径，自动查找整个跳过。改完发一次 #营地观战部署 生效。',
+            '留空 = 自动查找。提示「没找到 ffmpeg」时手填完整路径。',
           component: 'Input',
           componentProps: {
             placeholder: '留空 = 自动查找'
@@ -368,21 +372,14 @@ export function supportGuoba () {
           field: 'config.shareEnabled',
           label: '营地ID共享库',
           bottomHelpMessage:
-            '接入一个「QQ → 营地ID」共享池，让用户在别的机器人上绑过的营地ID 在本机也能直接用，不用重新绑定。' +
-            '共享库由主人统一提供，地址进群 972915804 找主人要（不再支持自行部署）。' +
-            '默认关闭：不接入时本插件所有功能都不受影响。' +
-            '用户默认**不共享**，要他们自己发 #开启营地ID共享 才会把自己的营地ID传上去。' +
-            '只有当场发的查询指令认共享数据，推送/排行榜/#谁在打游戏 仍只认本机绑定。' +
-            '本机还需要有一个可用的全局账号，共享来的营地ID 才查得动（#营地wx全局登录）。',
+            '接入「QQ → 营地ID」共享池，用户在别的机器人绑过的营地ID 这边能直接用。',
           component: 'Switch'
         },
         {
           field: 'config.shareApiUrl',
           label: '共享库地址',
           bottomHelpMessage:
-            '共享库服务端的地址，要带 http:// 或 https://。留空 = 不接入。' +
-            '等价指令：#营地共享库地址 <地址>。' +
-            '⚠️ 这格留空但上面「分发服务地址」填好了的话，打开本页会自动补上默认地址。',
+            '共享库地址，要带 http:// 或 https://。留空 = 不接入。',
           component: 'Input',
           componentProps: {
             placeholder: 'https://your-share.example.com'
@@ -392,9 +389,7 @@ export function supportGuoba () {
           field: 'config.shareAdminSecret',
           label: '共享库管理密钥（远程管理）',
           bottomHelpMessage:
-            '服务端 .env 里的 GOK_ADMIN_SECRET。库跑在别的机器或 Docker 上时，' +
-            '配上它就能用 #营地共享库发令牌 / 接入方 / 吊销 远程管库。' +
-            '这个密钥能签发、吊销令牌，权限很大，别往群里贴。',
+            '服务端的 GOK_ADMIN_SECRET，用来远程管库。别往群里贴。',
           component: 'Input',
           componentProps: {
             placeholder: '64 位十六进制（openssl rand -hex 32 生成）'
@@ -403,7 +398,7 @@ export function supportGuoba () {
         {
           field: 'config.distAdminSecret',
           label: '分发服务管理密钥（主人用）',
-          bottomHelpMessage: '签令牌 / 看接入方 / 吊销要用它。本机部署了分发服务时插件会自动读它的 .env，不用填；分发服务跑在别的机器上时才填。用 #营地分发管理密钥 <密钥> 设置（只收私聊）。',
+          bottomHelpMessage: '签令牌、看接入方、吊销要用它。本机部署了分发服务时不用填。',
           component: 'Input',
           componentProps: {
             placeholder: '64 位十六进制'
@@ -412,7 +407,7 @@ export function supportGuoba () {
         {
           field: 'config.distRepoUrl',
           label: '分发服务代码仓库',
-          bottomHelpMessage: '部署分发服务时从哪个仓库拉代码（它的 dist 分支）。一般不用改，换成自己的私库时才要。',
+          bottomHelpMessage: '部署分发服务时从哪个仓库拉代码。一般不用改。',
           component: 'Input',
           componentProps: {
             placeholder: '留空 = 用默认的私库'
@@ -425,7 +420,7 @@ export function supportGuoba () {
         {
           field: 'config.watchApiUrl',
           label: '观战服务地址',
-          bottomHelpMessage: '观战要另跑一个后端进程（负责取直播流、录像），插件通过这个地址指挥它。填的是**控制面**端口（默认 8898，只绑本机回环）；公网的 8899 播放面不受理开播/停止/名单。自己部署：先接入分发服务（见上面「服务端接入」），再发 #营地观战部署；用别人部署好的：发 #营地观战连接 <对方的控制面地址>（控制面只绑对方本机回环，需要对方专门开出来，否则自己装一套）。换地址改这里也行，不用重启云崽。',
+          bottomHelpMessage: '观战后端进程的地址。自己部署发 #营地观战部署，用别人的发 #营地观战连接。',
           component: 'Input',
           componentProps: {
             placeholder: '默认 http://127.0.0.1:8898'
@@ -434,7 +429,7 @@ export function supportGuoba () {
         {
           field: 'config.watchPublicUrl',
           label: '直播间对外地址',
-          bottomHelpMessage: '填写群友能访问的地址（域名或公网 IP）和端口，如 http://abc.com:8899，并放行防火墙/安全组对应端口。使用 https 时先配置 HTTPS 反向代理；需要 CDN 直连时，再配置下方「观战 CDN（https）」。',
+          bottomHelpMessage: '群友看直播用的地址，填域名或公网 IP 加端口。',
           component: 'Input',
           componentProps: {
             placeholder: '留空 = 用上面的地址'
@@ -443,7 +438,7 @@ export function supportGuoba () {
         {
           field: 'config.watchCdnHttps',
           label: '观战 CDN（https）',
-          bottomHelpMessage: '先按 server/README-CDN-HTTPS.md 部署 Cloudflare Worker，再填 https://cdn.example.com；保存后发 #营地观战部署 生效，清空后也要保存并部署。留空时 https 观众使用本机转发，http 观众仍直连营地 CDN。',
+          bottomHelpMessage: '配了 CDN 就填 https 地址，改完发一次 #营地观战部署。',
           component: 'Input',
           componentProps: {
             placeholder: 'https://cdn.example.com'
@@ -456,7 +451,7 @@ export function supportGuoba () {
         {
           field: 'config.campImApiUrl',
           label: '营地消息服务地址',
-          bottomHelpMessage: '营地消息要另跑一个后端进程（给每个营地号挂长连接收消息），插件通过这个地址指挥它。自己部署：先接入分发服务（见上面「服务端接入」），再发 #营地消息部署；用别人部署好的：直接发 #营地消息连接 <地址>，本机什么都不用装。换地址改这里也行，不用重启云崽。',
+          bottomHelpMessage: '营地消息后端进程的地址。自己部署发 #营地消息部署，用别人的发 #营地消息连接。',
           component: 'Input',
           componentProps: {
             placeholder: '默认 http://127.0.0.1:8900'
@@ -465,13 +460,13 @@ export function supportGuoba () {
         {
           field: 'config.campImEnabled',
           label: '营地消息总开关',
-          bottomHelpMessage: '关掉后插件不再拉消息、也不再推私信（服务端照常收）。每个营地号的收发只推给它的归属人 —— 没有归属人的号一律不推。哪个号要收消息、哪个不要，去侧边栏的「营地消息」页面一个个开关。',
+          bottomHelpMessage: '关掉就不再拉消息、也不推私信。哪些号收消息去侧边栏「营地消息」页面勾。',
           component: 'Switch'
         },
         {
           field: 'config.campImPollMs',
           label: '拉消息间隔（毫秒）',
-          bottomHelpMessage: '插件多久去服务端取一次新消息。走本机回环、没有风控，只影响推送延迟。别调太小（下限 1000）。',
+          bottomHelpMessage: '多久去服务端取一次新消息，别低于 1000。',
           component: 'InputNumber',
           componentProps: {
             min: 1000,
@@ -481,23 +476,43 @@ export function supportGuoba () {
         {
           field: 'config.campImPushImage',
           label: '推送带对方头像',
-          bottomHelpMessage: '开着的话推送会带对方在游戏里的头像。头像加载慢或发图失败时会自动降级成纯文字，不会丢消息。',
+          bottomHelpMessage: '推送时带上对方在游戏里的头像。',
           component: 'Switch'
         },
         {
           field: 'campIm.accounts',
           label: `哪些营地号收消息（共 ${campIm.accounts.length} 个）`,
-          helpMessage: '只对「有归属人」的号生效 —— 没有归属人的号一律不推，加了也没用。',
-          bottomHelpMessage:
-            '⚠️ 这是**收消息专用**的名单，跟查询/推送轮询用的账号池是两回事 —— ' +
-            '扫进来的全局账号默认**不**收消息，只拿来轮询查数据；要收消息的才加到这里。' +
-            '「删除」= 移出名单（立刻停掉它的长连接），删了不会再自动冒出来。' +
-            '想加号去侧边栏「营地消息」页面（那儿列着「可以加进来的号」）。' +
-            '归属人是扫码登录时记下的，想换人去「账号列表」改「归属 QQ」。',
+          // ⚠️ 这两段解释**必须放在问号里**，不能留 bottomHelpMessage（2026-10-06 修）。
+          //    锅巴把 GSubForm 归进 BLOCK_COMPONENTS（「整行大组件」），这一项的
+          //    label 竖排独占一行 —— 于是 bottomHelpMessage 会被渲染到表单**最左边**
+          //    （实测 24px），而别的项都在 184px，突出来一截很难看。
+          //    偏偏那段文字挂在锅巴的 FormItem 上、**不在组件内部**，componentProps
+          //    够不着它（只有控件本身挪得动，见下面 componentProps.style）。
+          //    收进 helpMessage 就没有这个位置问题了：它渲染在 label 旁边的问号里。
+          //    锅巴的 helpMessage 支持数组，两段会分行显示，信息一条不丢。
+          helpMessage: [
+            '只对「有归属人」的号生效 —— 没有归属人的号不推。',
+            '这是**收消息专用**的名单，跟查询/推送轮询的账号池是两回事。' +
+            '「删除」= 移出名单并停掉它的长连接；想加号去侧边栏「营地消息」页面。'
+          ],
           component: 'GSubForm',
           componentProps: {
             multiple: true,
             modalProps: { title: '营地号' },
+            // ⚠️ 把表格右移，让它跟别的项**左边缘对齐**（2026-10-06 修）。
+            //    锅巴把 GSubForm 归进 BLOCK_COMPONENTS（「整行大组件」），这一项的
+            //    label 会改成竖排独占一行，表格就顶到了表单最左边（实测 24px），
+            //    而别的项都在 184px（让开 label 那 160px）—— 表格突出来一截很难看。
+            //    componentProps 会透传到 GSubForm 的根元素，所以这一条能把表格挪回去。
+            //
+            // ⚠️ 160px 是**硬编码**的，对应锅巴 SchemaForm 的 labelWidth 默认值
+            //    （web/src/components/schema-form/SchemaForm.vue 的 `labelWidth: 160`）。
+            //    那个值插件侧读不到，锅巴也没开放给 schema 指定，只能照着写。
+            //    将来锅巴改了默认 labelWidth，这里要跟着改。
+            //
+            // ⚠️ 只挪得了表格本身：下面那段说明文字（bottomHelpMessage）挂在 FormItem
+            //    上、不在组件里，够不着，仍会留在最左边。
+            style: 'margin-left: 160px',
             schemas: [
               {
                 field: 'userId',
@@ -525,13 +540,13 @@ export function supportGuoba () {
         {
           field: 'config.watchHintEnabled',
           label: '开播引导',
-          bottomHelpMessage: '开了之后：订阅上下线提醒的人一上线，后台会盯着他进对局；进对局满设定分钟数、且确认这一局能看（是全局账号好友 + 排位/巅峰赛 + 没关战绩）时，往他订阅的群里发一条「要不要开播」的提示。群里任何人发 #营地开播 就能开这一路。',
+          bottomHelpMessage: '订阅上下线提醒的人进对局后，往群里发一条「要不要开播」的提示。',
           component: 'Switch'
         },
         {
           field: 'config.watchHintAfterMin',
           label: '开局多少分钟后提示',
-          bottomHelpMessage: '进对局满这么多分钟才发开播提示。太早发的话营地那边可能还没把流推起来，点开要等；3 分钟是实测比较稳的值。',
+          bottomHelpMessage: '进对局满这么多分钟才发提示。',
           component: 'InputNumber',
           componentProps: {
             min: 1,
@@ -542,7 +557,7 @@ export function supportGuoba () {
         {
           field: 'config.watchHintPollMs',
           label: '盯梢轮询间隔（毫秒）',
-          bottomHelpMessage: '盯梢期间多久查一次对局状态，默认 15000（15 秒）。别调太小 —— 营地接口有频控，命中一次该账号要静默 12 小时。下限 5000。',
+          bottomHelpMessage: '盯梢时多久查一次对局状态。别调太小，会被营地限流。',
           component: 'InputNumber',
           componentProps: {
             min: 5000,
@@ -551,9 +566,24 @@ export function supportGuoba () {
           }
         },
         {
+          field: 'config.campSignCron',
+          label: '每日签到时间（cron）',
+          bottomHelpMessage: '到点给每个号签一次，结果私聊各自的号主。默认每天 7:30。留空 = 关掉定时（还能手发 #王者签到）。只推「签上了」和「失败了」，已签过和没绑角色的号不打扰。',
+          component: 'Input',
+          componentProps: {
+            placeholder: "默认 0 30 7 * * *（秒 分 时 日 月 周）"
+          }
+        },
+        {
+          field: 'config.campSignAutoTask',
+          label: '签到后顺手做福利任务',
+          bottomHelpMessage: '签到时把福利中心的「浏览资讯」「点赞」「分享」也做掉，再把奖励领回来（各 25 营地币）。⚠️「点赞」是拿你的号真去点别人的内容，介意就关掉。（「分享」只上报状态、不会真发出去。）',
+          component: 'Switch'
+        },
+        {
           field: 'config.campRenewCron',
           label: '登录态保活时间（cron）',
-          bottomHelpMessage: '营地的 token 不给过期时间、也没有刷新接口 —— 是「用则续命、闲置才死」（闲置久了会报登录态失效）。这里配个时间，插件会定期给每个号戳一下把它保住，QQ 和微信都适用。默认每天 5:13 跑一次。留空 = 关掉定时（还能手发 #营地续期）。QQ 号万一还是失效了能自动重登救回；微信失效只能重新扫码。',
+          bottomHelpMessage: '定期给每个号续一下登录态，默认每天 5:13。留空 = 关掉定时。',
           component: 'Input',
           componentProps: {
             placeholder: "默认 0 13 5 * * *（秒 分 时 日 月 周）"
@@ -566,12 +596,8 @@ export function supportGuoba () {
         {
           field: 'config.imgType',
           label: '输出图片类型',
-          helpMessage: '插件所有出图指令（战绩 / 主页 / 皮肤墙 / 帮助面板 / 营地消息卡片…）统一用这个格式',
-          bottomHelpMessage:
-            '插件 37 处出图统一读这一项，改完下次出图就生效，不用重启。' +
-            '⚠️ 选 WebP 之前先看你的适配器：微信（ComWeChat）的图片接口不认 webp，' +
-            '会把图降级成「文件」发出去 —— 群友收到的是 xxx.webp 文件卡片而不是图（2026-09-24 实测）。' +
-            'QQ / OneBot 等平台用 webp 能省三成左右体积。拿不准就保持 JPEG。',
+          helpMessage: '插件所有出图都用这个格式',
+          bottomHelpMessage: '⚠️ 微信不认 webp，会变成文件发出去。',
           component: 'Select',
           componentProps: {
             options: [
@@ -588,7 +614,7 @@ export function supportGuoba () {
         {
           field: 'config.imgCacheMaxMB',
           label: '图片缓存上限',
-          bottomHelpMessage: '插件下载的远程图片（英雄头像、皮肤图）缓存在 data/imgCache，单张平均 490KB。#皮肤墙 / #全部皮肤 一次会拉几百张，几个人轮着查就能堆到几百 MB —— 7 天过期只管时间管不住量，所以这里再加一道按体积削的兜底：超出上限时按下载时间从旧到新删。填 0 = 不限量。用 #王者缓存状态 看当前占用。',
+          bottomHelpMessage: '图片缓存最多占多少 MB，超了从最旧的开始删。填 0 = 不限量。',
           component: 'InputNumber',
           componentProps: {
             min: 0,
@@ -599,7 +625,7 @@ export function supportGuoba () {
         {
           field: 'config.imgCacheCleanCron',
           label: '缓存清理时间',
-          bottomHelpMessage: '每天按上面的上限清一次图片缓存。默认凌晨 4 点，避开白天出图高峰。插件启动 30 秒后也会清一次（pm2 下 Yunzai 可以连着跑几个月不重启，只靠启动清理等于永不清理）。',
+          bottomHelpMessage: '每天按上面的上限清一次图片缓存。',
           helpMessage: '修改后重启生效',
           component: 'EasyCron',
           componentProps: {
@@ -613,7 +639,7 @@ export function supportGuoba () {
         {
           field: 'config.skinNewsCron',
           label: '皮肤上新检查时间',
-          bottomHelpMessage: '每天按这个时间查一次官网资料库，把「今天上线」和「新进清单（还没上线）」的皮肤推给已 #开启皮肤上新推送 的群。数据是官网公开 JSON，不占营地请求配额。留空 = 不自动推送，只保留 #皮肤上新 指令。',
+          bottomHelpMessage: '每天按这个时间查一次皮肤上新，推给订阅的群。留空 = 只保留指令。',
           helpMessage: '修改后重启生效',
           component: 'EasyCron',
           componentProps: {
@@ -627,7 +653,7 @@ export function supportGuoba () {
         {
           field: 'config.gameNewsCron',
           label: '公告检查时间',
-          bottomHelpMessage: '按这个时间查一次官网资讯，把新发的版本更新 / 体验服 / 活动公告推给已 #开启王者公告推送 的群。数据是官网公开接口，不占营地请求配额。首次运行只记时间水位、不补推历史。留空 = 不自动推送，只保留 #王者公告 指令。',
+          bottomHelpMessage: '按这个时间查一次官网公告，推给订阅的群。留空 = 只保留指令。',
           helpMessage: '修改后重启生效',
           component: 'EasyCron',
           componentProps: {
@@ -642,18 +668,25 @@ export function supportGuoba () {
           field: 'config.blackList',
           label: '插件黑名单',
           helpMessage: '命令：#王者拉黑@某人 / #王者取消拉黑@某人 / #王者黑名单',
-          bottomHelpMessage: '填 QQ 号，可以填多个。名单里的人发任何王者指令都不会有回应，之前订阅的战绩推送、上下线提醒、日报周报月报也不再推，群报和排行榜里也不统计他。订阅和绑定数据都不会被删，从名单里移出去就自动恢复。主人不受影响。',
-          component: 'GTags',
+          bottomHelpMessage: '名单里的人发任何指令都不回应，推送也不再发。订阅和绑定不会被删。',
+          // ⚠️ 用 Select 的 tags 模式而不是 GTags（2026-10-06 修）：锅巴把 GTags 归进
+          //    BLOCK_COMPONENTS（「整行大组件」），label 会改成**竖排**，于是控件和
+          //    下面的说明文字一起顶到表单最左边 —— 实测左边缘 22px，而别的项是 184px
+          //    （让开 label 那 160px），这一段明显突出来一截。
+          //    Select 不在那个名单里，label 回到横排，控件和说明就自动对齐了。
+          //    功能完全等价：tags 模式照样能一条一条加/删，数据也都是字符串数组。
+          component: 'Select',
           componentProps: {
-            placeholder: '请输入要拉黑的 QQ 号',
-            allowAdd: true,
-            allowDel: true
+            mode: 'tags',
+            placeholder: '输入 QQ 号后回车',
+            tokenSeparators: [',', '，', ' '],
+            allowClear: true
           }
         },
         {
           field: 'config.blackListFollowGlobal',
           label: '跟随机器人全局黑名单',
-          bottomHelpMessage: '默认开启。开启后，机器人自身黑名单（Yunzai 的 config/config/other.yaml，blackUser / blackQQ 两个字段）里的人也一样不响应。全局黑名单只挡用户主动发的指令，挡不住插件按时间主动发的推送，所以开着它才能把「人已经拉黑了、战绩推送还在推」一起停掉。这里只是跟随，不会去改动全局名单。',
+          bottomHelpMessage: '跟着机器人自己的黑名单一起挡。',
           component: 'Switch'
         },
         {
@@ -667,7 +700,7 @@ export function supportGuoba () {
         {
           field: 'auth.gameAreaId',
           label: '游戏 AreaId',
-          bottomHelpMessage: '请求默认值。账号本身未携带该字段时，默认使用这里的值，通常保持 1。',
+          bottomHelpMessage: '账号本身没带该字段时用这个值，通常保持 1。',
           component: 'Input',
           componentProps: {
             placeholder: '默认 1'
@@ -676,7 +709,7 @@ export function supportGuoba () {
         {
           field: 'auth.gameUserSex',
           label: '游戏性别',
-          bottomHelpMessage: '请求默认值。账号本身未携带该字段时，默认使用这里的值，通常保持 1。',
+          bottomHelpMessage: '账号本身没带该字段时用这个值，通常保持 1。',
           component: 'Input',
           componentProps: {
             placeholder: '默认 1'
@@ -685,7 +718,7 @@ export function supportGuoba () {
         {
           field: 'auth.kohDimGender',
           label: '营地性别',
-          bottomHelpMessage: '请求默认值。账号本身未携带该字段时，默认使用这里的值，通常保持 2。',
+          bottomHelpMessage: '账号本身没带该字段时用这个值，通常保持 2。',
           component: 'Input',
           componentProps: {
             placeholder: '默认 2'
@@ -694,7 +727,7 @@ export function supportGuoba () {
         {
           field: 'auth.serverTimeOffsetMs',
           label: '时间偏移毫秒',
-          bottomHelpMessage: '请求默认值。只有本机时间和服务端时间存在明显偏差时才需要填写，通常保持 0。',
+          bottomHelpMessage: '本机时间跟服务端差得多时才填，通常保持 0。',
           component: 'InputNumber',
           componentProps: {
             placeholder: '默认 0'
@@ -711,8 +744,8 @@ export function supportGuoba () {
         {
           field: 'authPool.accounts',
           label: `营地账号列表（共 ${authPoolAccounts.length} 个，可用 ${usableCount} 个，失效 ${invalidCount} 个）`,
-          helpMessage: '管理 AuthPool.json 中的完整账号信息。字段名已尽量按实际代码名标注；手动录入时，至少需要 userId、token、userKey 这三个核心字段。',
-          bottomHelpMessage: '删除条目会从账号池移除该账号；敏感字段（Token/UserKey/UserSig 等）展示时已打码，没改过的掩码值保存时会自动还原成原值，要换就直接粘贴新值覆盖；全局账号和优先级都直接在这里维护（“全局账号”可以勾选多个，请求会在它们之间轮询）。',
+          helpMessage: '手动录入时至少要有 userId、token、userKey 三个字段',
+          bottomHelpMessage: '删除条目会把账号移出账号池。Token/UserKey 等敏感字段展示时已打码，粘贴新值即可覆盖。',
           component: 'GSubForm',
           componentProps: {
             multiple: true,
@@ -1054,10 +1087,40 @@ export function supportGuoba () {
           campIm: { accounts: campIm.accounts }
         }
       },
-      setConfigData (data, { Result }) {
+      // ⚠️ 必须 async：下面要 `await inst.syncTaskCron(...)` 重排 job。
+      //    少了这个关键字是**语法错误**（`await` 只在 async 函数里合法），
+      //    而它会让**整个 guoba.support.js 加载失败** —— 不是「那个功能不生效」，
+      //    是整个插件在锅巴面板里消失。2026-10-10 排查到（`node --check` 报
+      //    `Unexpected reserved word`；注意在**没有 package.json 的目录**下检查
+      //    会走语法探测、把顶层 await 放过，得在插件目录里检查才暴露）。
+      async setConfigData (data, { Result }) {
         const configMap = {
           config: Config.getDefOrConfig('config'),
           auth: Config.getDefOrConfig('auth')
+        }
+
+        /**
+         * ⭐「刚打开自动签到 → 当场签一次」（2026-10-10 主人要求）。
+         *
+         * ⚠️⚠️ 判据必须**窄**：不能「保存了就签」。这个面板有二十多个配置项，
+         *    主人改任何一格都触发一轮签到的话，每保存一次就打十几个营地请求，
+         *    十有八九撞 -30107（命中一次静默 12 小时）。
+         *
+         * 只在「这一格真的从旧值变成非空」时才签 = 「刚把自动签到打开」那一刻。
+         * 三个条件缺一不可：
+         *   ① 提交里**有** `config.campSignCron`（没提交 = 主人根本没碰这格）
+         *   ② 新值**非空**（空 = 他是来关掉的，不该签）
+         *   ③ 与旧值**不同**（保存了但没改，不该重复签）
+         */
+        const signCronKey = 'config.campSignCron'
+        let turnedOnSign = false
+        /** 提交里带了 cron 就记下新值，保存完之后用它重排 job（null = 这次没碰这格） */
+        let nextSignCron = null
+        if (Object.prototype.hasOwnProperty.call(data, signCronKey)) {
+          const nextValue = String(data[signCronKey] ?? '').trim()
+          const prevValue = String(get(configMap.config, 'campSignCron') ?? '').trim()
+          turnedOnSign = Boolean(nextValue) && nextValue !== prevValue
+          nextSignCron = nextValue
         }
 
         if (Object.prototype.hasOwnProperty.call(data, 'authPool.accounts')) {
@@ -1076,7 +1139,7 @@ export function supportGuoba () {
           // ⚠️⚠️ 前端是**全量提交**当前名单的，删掉一行 = 那一项压根不出现在 payload 里。
           //    只逐个 set 的话，被删掉的那一行从来没被遍历到，于是永远留在名单里 ——
           //    而 apps/campIm.js 照样给它挂长连接、照样往归属人推私信（2026-10-06 修）。
-          //    正确做法见同仓库 guoba/index.js 的 /gok-camp-im/accounts：先做差集移出，再加入。
+          //    正确做法见同仓库 webadapter/index.js 的 /gok-camp-im/accounts：先做差集移出，再加入。
           // ⚠️ 同时补 Array.isArray 守卫（照上面 authPool 那半边的写法）：payload 不是数组就
           //    **别动名单** —— `|| []` 兜不住普通对象，`for...of` 抛 TypeError 会把后面
           //    config / auth 的写回整批带崩，用户看到的是「点了保存但什么都没变」。
@@ -1113,6 +1176,57 @@ export function supportGuoba () {
           const currentValue = get(configMap[configName], configPath)
           if (!isEqual(currentValue, data[key])) {
             Config.modify(configName, configPath, data[key])
+          }
+        }
+
+        // ⚠️ 放在**所有写回之后**：这会儿配置才真的落盘。
+        //    即时签到是异步跑的（见 signNowAfterEnable），保存接口立刻返回。
+        if (turnedOnSign) {
+          try {
+            const inst = currentCampSignInstance()
+            if (inst) {
+              const started = inst.signNowAfterEnable()
+              logger.info(
+                started
+                  ? `[${PluginName}] 自动签到已开启，先当场签一次（结果会私聊各号主）`
+                  : `[${PluginName}] 自动签到已开启，但已有一轮在跑，这次没即时签`
+              )
+            } else {
+              logger.warn(`[${PluginName}] 自动签到已开启，但取不到签到实例，这次没即时签`)
+            }
+          } catch (error) {
+            // 即时签到失败**不能**让保存失败 —— 配置已经存好了，那才是主诉求
+            logger.warn(`[${PluginName}] 开启自动签到后的即时签到触发失败：${error?.message || error}`)
+          }
+        }
+
+        /**
+         * ⭐⭐「面板改了签到时间 → 让 job 跟上」（2026-10-10 补的缺口）。
+         *
+         * ⚠️⚠️ 这一段**不能省**，而且跟上面那段是**两件事**：
+         *   · 上面只管「刚开启 → 当场签一次」（要签，但只管这一次）
+         *   · 这里管「job 有没有按新 cron 排上」（不签，但管以后每天）
+         *
+         * 少了它会怎样：主人原本关着自动签到（配置为空 → `collectTask` 压根没注册 job），
+         * 然后在面板里填上 `0 30 7 * * *` 保存 —— 配置是对的、面板显示开着，
+         * **但 job 从来没注册过，第二天早上什么都不发生**。
+         * 而 `autoSign` 开头那道闸门只挡「配置空」，挡不住「配置非空但没 job」。
+         *
+         * 判据比上面宽一点：**只要提交里带了这一格**就重排（不要求「值变了」）——
+         * 重排是幂等的（框架会先 cancel 再重建），多排一次没有任何副作用；
+         * 而「值没变就不排」会在「配置被别的途径改过、job 没跟上」时漏掉。
+         */
+        if (nextSignCron !== null) {
+          try {
+            const inst = currentCampSignInstance()
+            if (inst) {
+              await inst.syncTaskCron(nextSignCron)
+            } else {
+              logger.warn(`[${PluginName}] 签到时间已保存，但取不到签到实例，job 没能重排`)
+            }
+          } catch (error) {
+            // 同上：重排失败不能让保存失败（配置已经落盘了）
+            logger.warn(`[${PluginName}] 签到时间保存后重排 job 失败：${error?.message || error}`)
           }
         }
 

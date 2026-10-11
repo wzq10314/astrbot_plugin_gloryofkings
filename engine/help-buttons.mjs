@@ -3,6 +3,20 @@
 const NEEDS_INPUT = new Set(['#切换营地', '#删除营地', '#王者对比', '#查战力', '#查皮肤']);
 const MAIN_HELP = /^#?王者(?:荣耀|农药)?(?:插件|plugin)?(?:帮助|help)\s*$/i;
 const COMMAND = /^#[^\s\[\]<>^$|{}()\\]+$/u;
+const NUMBERED_EXCHANGE = /^#营地兑换\s+\d+$/u;
+// These spellings share the exact homepage handlers and argument parsing.
+// Other metadata aliases can select different modes (rank/peak, enable/disable),
+// so do not collapse aliases merely because they belong to the same help card.
+const HOMEPAGE_BUTTON_ALIASES = new Map([
+  ['#王者卡片', '#王者主页'], ['#王者信息', '#王者主页'],
+  ['#全部主页', '#全部王者主页'], ['#全部卡片', '#全部王者主页'],
+  ['#全部信息', '#全部王者主页'], ['#全部王者卡片', '#全部王者主页'],
+  ['#全部王者信息', '#全部王者主页'],
+]);
+
+export function canonicalHelpCommand(command) {
+  return HOMEPAGE_BUTTON_ALIASES.get(command) || command;
+}
 
 function literalPrefix(args) {
   return args.split(/[\[<@]/u, 1)[0].trim();
@@ -25,8 +39,8 @@ export function helpButtonRows(event, sections) {
       const commands = [item.cmd, ...(Array.isArray(item.alias) ? item.alias : [])];
       for (const raw of commands) {
         if (typeof raw !== 'string') continue;
-        const command = raw.trim();
-        if (!COMMAND.test(command)) continue;
+        const command = canonicalHelpCommand(raw.trim());
+        if (!COMMAND.test(command) && !NUMBERED_EXCHANGE.test(command)) continue;
         if (command === '#查询N战绩') {
           add({text: '按账号序号查战绩', input: '#查询[账号序号]战绩 [对局序号]'});
           continue;
@@ -42,6 +56,8 @@ export function helpButtonRows(event, sections) {
           add({text: prefix.slice(1), callback: prefix});
           if (command === '#绑定营地') {
             add({text: '填写营地ID', input: '#绑定营地 [营地ID]'});
+          } else if (command === '#营地兑换') {
+            add({text: '填写兑换编号', input: '#营地兑换 [编号]'});
           } else if (args === '[刷新]') {
             add({text: prefix.slice(1) + '·刷新', callback: prefix + ' 刷新'});
           }

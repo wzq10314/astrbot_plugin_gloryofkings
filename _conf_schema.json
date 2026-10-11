@@ -290,5 +290,15 @@
     "description": "王者公告检查时间（6 位 cron，含秒；默认每两小时的第53分钟检查）。留空关闭自动推送。需要在目标群开启公告推送，首次检查不补推历史公告。",
     "type": "string",
     "default": "0 53 */2 * * *"
+  },
+  "campSignCron": {
+    "description": "营地自动签到cron，默认关闭；可发 开启王者自动签到 设置每天7:30",
+    "type": "string",
+    "default": ""
+  },
+  "campSignAutoTask": {
+    "description": "签到同时做浏览/点赞/分享福利任务并领取奖励（含真实点赞，默认关闭）",
+    "type": "bool",
+    "default": false
   }
 }

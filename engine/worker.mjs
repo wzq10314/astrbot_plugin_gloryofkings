@@ -7,6 +7,7 @@ import {AsyncLocalStorage} from 'node:async_hooks';
 import schedule from 'node-schedule';
 import renderer from './renderer.mjs';
 import {runPushTask} from './push-membership.mjs';
+import {createTaskLoader} from './task-scheduler.mjs';
 
 register('./loader.mjs',import.meta.url);
 const write=process.stdout.write.bind(process.stdout);
@@ -166,28 +167,31 @@ try {
   entries=Object.entries(classes).map(([file,App])=>[file,new App()]).sort((a,b)=>(a[1].priority??500)-(b[1].priority??500));
   // AstrBot-specific management replaces the Guoba page, with the same persistent stores.
   const {default:Management}=await import('./management.mjs');entries.unshift(['astrbotManagement.js',new Management()]);
-  if(initial.schedules!==false)for(const [file,app] of entries){
+  const contexts = new WeakMap();
+  globalThis.gokTaskLoader = createTaskLoader({
+    scheduleJob: schedule.scheduleJob.bind(schedule),
+    contextOf: task => contexts.get(task),
+    onJobs: current => { jobs = current; },
+    report: ({file}) => emit({type:'diagnostic',code:'ScheduledTaskFailed',app:file}),
+    run: async ({file,app}, task) => {
+      const run = () => typeof task.fnc === 'function' ? task.fnc() : app[task.fnc]();
+      if(!initial.official&&['gameRecordPush.js','battleReport.js'].includes(file)){
+        const targets=()=>Object.entries(pushStore.loadPushList()).map(([qq,sub])=>[qq,pushStore.subGroups(sub)]);
+        const before=JSON.stringify(targets());
+        const ids=JSON.parse(before).flatMap(([,groups])=>groups);
+        const ran=await runPushTask(Bot,ids,
+          groups=>call('push_membership',{groups}),run,()=>JSON.stringify(targets())===before);
+        if(!ran)emit({type:'diagnostic',code:'GroupMembershipUnavailable',app:file});
+      } else await run();
+    },
+  });
+  for (const [file,app] of entries) {
     if(initial.official&&file==='groupReport.js')continue;
-    for(const task of (Array.isArray(app.task)?app.task:[app.task]).filter(t=>t?.cron&&t?.fnc)){
-      let running=false;
-      const job=schedule.scheduleJob({rule:task.cron,tz:'Asia/Shanghai'},async()=>{
-        if(running)return;running=true;
-        try{
-          const run=()=>typeof task.fnc==='function'?task.fnc():app[task.fnc]();
-          if(!initial.official&&['gameRecordPush.js','battleReport.js'].includes(file)){
-            const targets=()=>Object.entries(pushStore.loadPushList()).map(([qq,sub])=>[qq,pushStore.subGroups(sub)]);
-            const before=JSON.stringify(targets());
-            const ids=JSON.parse(before).flatMap(([,groups])=>groups);
-            const ran=await runPushTask(Bot,ids,
-              groups=>call('push_membership',{groups}),run,()=>JSON.stringify(targets())===before);
-            if(!ran)emit({type:'diagnostic',code:'GroupMembershipUnavailable',app:file});
-          }else await run();
-        }
-        catch{emit({type:'diagnostic',code:'ScheduledTaskFailed',app:file})}
-        finally{running=false}
-      });
-      if(!job)throw Error('InvalidCron:'+file);jobs.push(job);
+    for (const task of (Array.isArray(app.task)?app.task:[app.task]).filter(t=>t?.fnc)) {
+      contexts.set(task,{file,app});
+      if(task.cron)globalThis.gokTaskLoader.task.push(task);
     }
   }
+  if(initial.schedules!==false)globalThis.gokTaskLoader.createTask();
   emit({type:'ready',inventory:inventory(),jobs:jobs.length});
 } catch(error){emit({type:'fatal',code:error.code||error.name,detail:String(error.message).slice(0,400)});process.exit(1);}

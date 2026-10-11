@@ -116,11 +116,31 @@ def prepare_runtime(engine: Path, destination: Path, settings: dict, host_blackl
                 raise ValueError('Upstream IM dependency hook changed')
             text = text.replace(upstream_hook, '')
         file.write_text(text.replace(anchor, hook+anchor), encoding='utf-8')
+    # These two upstream commands change one bot-wide cron, not just this user.
+    sign_file = target / 'apps/signIn.js'
+    sign = sign_file.read_text(encoding='utf-8')
+    for method in ('enableAuto', 'disableAuto'):
+        anchor = "fnc: '" + method + "'"
+        if sign.count(anchor) != 1:
+            raise ValueError('Upstream sign cron hook changed: ' + method)
+        sign = sign.replace(anchor, anchor + ", permission: 'master'")
+    sign = sign.replace('锅巴面板 → 王者荣耀 → 营地签到', 'AstrBot 插件配置 → campSignCron')
+    sign_file.write_text(sign, encoding='utf-8')
+    help_file = target / 'apps/help.js'
+    help_source = help_file.read_text(encoding='utf-8')
+    for command in ('#开启王者自动签到', '#关闭王者自动签到'):
+        anchor = "{ cmd: '" + command + "',"
+        if help_source.count(anchor) != 1:
+            raise ValueError('Upstream sign help hook changed: ' + command)
+        help_source = help_source.replace(anchor, "{ ownerOnly: true, cmd: '" + command + "',")
+    help_source = help_source.replace('每天 7:30 也会自动签', '管理员启用后每天 7:30 自动签')
+    help_file.write_text(help_source, encoding='utf-8')
     (destination / 'package.json').write_text('{"type":"module"}', encoding='utf-8')
     # npm dependencies are resolved by loader.mjs for upstream imports.
     for relative, text in {
         'lib/puppeteer/puppeteer.js': f'export {{default}} from {json.dumps((engine / "renderer.mjs").resolve().as_uri())};',
         'lib/common/common.js': 'export default {sleep:ms=>new Promise(r=>setTimeout(r,ms)),makeForwardMsg:async(e,rows)=>({type:"forward",rows:rows.map(message=>({message}))})};',
+        'lib/plugins/loader.js': 'export default globalThis.gokTaskLoader;',
         'plugins/other/update.js': '''export class update extends plugin {
           async update(){return this.e.reply(await gok.call('upstream',{}))}
           getPlugin(){return true}
@@ -137,6 +157,9 @@ def prepare_runtime(engine: Path, destination: Path, settings: dict, host_blackl
         if not file.exists(): file.write_text(yaml.safe_dump(initial),encoding='utf-8')
     defaults = yaml.safe_load((source / 'config/default_config/config.yaml').read_text(encoding='utf-8'))
     defaults['remoteAccountAllowedUrls'] = []
+    # New scheduled/social actions are opt-in in AstrBot; existing explicit values survive.
+    defaults['campSignCron'] = ''
+    defaults['campSignAutoTask'] = False
     config_file = target / 'config/config/config.yaml'
     config_file.parent.mkdir(parents=True, exist_ok=True)
     current = yaml.safe_load(config_file.read_text(encoding='utf-8')) if config_file.exists() else {}

@@ -224,6 +224,25 @@
     ]
   },
   {
+    "file": "campCoin.js",
+    "name": "王者营地币",
+    "rules": [
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#营地兑换(?:\\s*(\\d+))?(?:\\s*确认)?\\s*(?:@[^#]*)?$",
+        "flags": "",
+        "fnc": "exchange",
+        "permission": ""
+      },
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(?:营地币|营地余额)\\s*(?:@[^#]*)?$",
+        "flags": "",
+        "fnc": "balance",
+        "permission": ""
+      }
+    ],
+    "tasks": []
+  },
+  {
     "file": "campFriend.js",
     "name": "王者营地好友",
     "rules": [
@@ -626,6 +645,42 @@
       }
     ],
     "tasks": []
+  },
+  {
+    "file": "signIn.js",
+    "name": "王者营地签到",
+    "rules": [
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(?:开启|打开|启用)王者自动签到\\s*(?:@[^#]*)?$",
+        "flags": "",
+        "fnc": "enableAuto",
+        "permission": "master"
+      },
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(?:关闭|关掉|停用)王者自动签到\\s*(?:@[^#]*)?$",
+        "flags": "",
+        "fnc": "disableAuto",
+        "permission": "master"
+      },
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#王者签到状态\\s*(?:@[^#]*)?$",
+        "flags": "",
+        "fnc": "checkStatus",
+        "permission": ""
+      },
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#王者签到\\s*(?:@[^#]*)?$",
+        "flags": "",
+        "fnc": "signIn",
+        "permission": ""
+      }
+    ],
+    "tasks": [
+      {
+        "name": "王者营地每日签到",
+        "cron": ""
+      }
+    ]
   },
   {
     "file": "skinMissing.js",
