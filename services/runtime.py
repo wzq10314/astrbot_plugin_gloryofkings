@@ -38,6 +38,29 @@ def adapt_deploy_errors(source: str, helper: Path) -> str:
             f'{json.dumps(helper.resolve().as_uri())};\n' + source)
 
 
+def adapt_camp_im_photos(source: str) -> str:
+    """An avatar-only fallback must not consume a message containing real photos."""
+    before = 'if (!pic && image) pic = segment.image(image)'
+    after = 'if (!pic && image && !photos.length) pic = segment.image(image)'
+    if source.count(before) != 1:
+        raise ValueError('Upstream camp image fallback hook changed')
+    return source.replace(before, after)
+
+
+def adapt_private_receipts(source: str) -> str:
+    """Recognize only the official bridge's completed-send marker, never fake IDs."""
+    before = '(result.retcode === undefined || result.retcode === 0) && pickMessageId(result))'
+    after = """(result.retcode === undefined || result.retcode === 0) &&
+    (pickMessageId(result) || (api?.adapter?.name === 'QQOfficial' &&
+      result._astrbot_send_completed === true)))"""
+    if (source.count(before) != 1 or source.count('confirmed(result)') != 2 or
+            source.count('function confirmed (result)') != 1):
+        raise ValueError('Upstream private receipt hook changed')
+    return (source.replace(before, after)
+            .replace('function confirmed (result)', 'function confirmed (result, api)')
+            .replace('confirmed(result)', 'confirmed(result, api)'))
+
+
 def prepare_runtime(engine: Path, destination: Path, settings: dict, host_blacklist=()):
     source = engine / 'upstream'
     target = destination / 'plugins/GloryOfKings-Plugin'
@@ -126,6 +149,12 @@ def prepare_runtime(engine: Path, destination: Path, settings: dict, host_blackl
         sign = sign.replace(anchor, anchor + ", permission: 'master'")
     sign = sign.replace('锅巴面板 → 王者荣耀 → 营地签到', 'AstrBot 插件配置 → campSignCron')
     sign_file.write_text(sign, encoding='utf-8')
+    im_push = target / 'utils/campImPush.js'
+    im_push.write_text(adapt_camp_im_photos(im_push.read_text(encoding='utf-8')),
+                       encoding='utf-8')
+    private_msg = target / 'utils/privateMsg.js'
+    private_msg.write_text(adapt_private_receipts(private_msg.read_text(encoding='utf-8')),
+                          encoding='utf-8')
     help_file = target / 'apps/help.js'
     help_source = help_file.read_text(encoding='utf-8')
     for command in ('#开启王者自动签到', '#关闭王者自动签到'):

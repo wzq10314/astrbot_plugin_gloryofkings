@@ -65,10 +65,31 @@ async function test(name, callback) {
   }
 }
 const components = {Config: {getDefOrConfig: () => ({watchApiUrl: base, watchHintAfterMin: 3})}};
+// These pure helpers were added upstream after this fixture was written.
+// Execute their real bodies rather than leaving stale undefined mock exports.
+const rankSource = fs.readFileSync(path.join(root, 'utils/rankStore.js'), 'utf8');
+const pushSource = fs.readFileSync(path.join(root, 'utils/pushStore.js'), 'utf8');
+const extract = (source, expression) => {
+  const match = source.match(expression);
+  assert.ok(match, 'Upstream pure-helper boundary changed');
+  return match[0].replace(/^export\s+/, '');
+};
+const purePush = new Function([
+  extract(rankSource, /^const PRIVATE_USE_RE = [^\n]+/m),
+  extract(rankSource, /^const INVISIBLE_RE = [^\n]+/m),
+  extract(rankSource, /^export function cleanName \(name\) \{[\s\S]*?^\}/m),
+  extract(rankSource, /^export function normalizeName\(name\) \{[\s\S]*?^\}/m),
+  extract(pushSource, /^const toInt = value => \{[\s\S]*?^\}/m),
+  extract(pushSource, /^export function formatGamingHintText \([^\n]+\) \{[\s\S]*?^\}/m),
+  extract(pushSource, /^export function formatGamingText \([^\n]+\) \{[\s\S]*?^\}/m),
+  'return {normalizeName, formatGamingHintText, formatGamingText};'
+].join('\n'))();
 const {GameRecordPush} = await load('apps/gameRecordPush.js', {
   '#components': components,
   '#utils': {isBlackUser: () => false},
   '../utils/pushStore.js': {
+    ...purePush,
+    getHeroNameMap: async () => ({}),
     loadPushList: () => list,
     subGroups: sub => sub.groups || [],
     isFlagOn: (sub, key) => sub[key] === true,
@@ -82,6 +103,11 @@ const {GameRecordPush} = await load('apps/gameRecordPush.js', {
   }
 });
 const game = new GameRecordPush();
+// Upstream now has a hero-map argument before coordinates. Preserve the old
+// fixture's coordinate shorthand without dropping the real production slot.
+const sendHint = game.sendHint.bind(game);
+game.sendHint = (...args) => sendHint(...(args.length === 5
+  ? [...args.slice(0, 4), {}, args[4]] : args));
 game.send = async (qq, sub, text) => {delivered.push({qq, groups: [...sub.groups], text}); return sendOk};
 game.resolveDisplayName = async () => '群名片';
 const {WatchBattle} = await load('apps/watchBattle.js', {
@@ -183,10 +209,12 @@ for (const method of ['checkHint', 'hintTick']) {
     assert.deepEqual(latestCalls, method === 'hintTick' ? [['777', 'user-1']] : []);
     if (method === 'hintTick') assert.equal(list['user-1'].hintWatching, '');
   });
-  await test(`${method} suppresses definite nonfriends and finishes that battle`, async () => {
+  await test(`${method} suppresses nonfriend watch hints but keeps ordinary gaming notice`, async () => {
     seed(); expectFriends({ok: true, friendCampIds: [], playing: []});
     await run();
-    assert.equal(delivered.length, 0);
+    assert.equal(delivered.length, 1);
+    assert.match(delivered[0].text, /进入了/);
+    assert.doesNotMatch(delivered[0].text, /#营地开播/);
     assert.equal(list['user-1'].hintGamingStart, 'start-777');
     if (method === 'hintTick') assert.equal(list['user-1'].hintWatching, '');
   });

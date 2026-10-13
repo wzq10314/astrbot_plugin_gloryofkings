@@ -197,7 +197,11 @@ class OfficialBridge(Bridge):
             result = await self.plugin.context.send_message(destination['origin'], chain)
         if result is False:
             raise BridgeError('QQ 官方消息未发送成功，请检查主动消息权限及平台限制。')
-        # AstrBot send() may return None. Do not invent a receipt or message ID.
+        # A successful await may return no platform receipt. This internal marker
+        # confirms completion of that send call, not delivery/read status, and
+        # deliberately contains no fabricated platform message ID.
+        if result is None or result is True:
+            return {'_astrbot_send_completed': True}
         return result if isinstance(result, dict) else {}
 
     async def upload(self, data):

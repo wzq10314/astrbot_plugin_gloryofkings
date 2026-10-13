@@ -113,12 +113,42 @@ class OfficialTransport(unittest.IsolatedAsyncioTestCase):
         self.bridge.observe(second)
         result = await self.bridge.send({'kind': 'group', 'id': first.group, 'event_ref': ref,
             'message': ['真实结果', {'type': 'button', 'rows': [[{'text': '查战力', 'input': '#查战力 '}]]}]})
-        self.assertEqual(result, {})  # no invented platform message ID
+        self.assertEqual(result, {'_astrbot_send_completed': True})
+        self.assertNotIn('message_id', result)  # no invented platform message ID
         self.assertEqual(first.sent[0].chain[0].text, '真实结果')
         self.assertFalse(second.sent)
         self.assertFalse(self.context.sent)
         self.assertEqual(first.sent[0].qqofficial_buttons[0][0]['input'], '#查战力 ')
         self.assertFalse(first.extra['qq_official_card']['buttons'][0]['enter'])
+
+    async def test_completed_send_marker_does_not_mask_failure_or_invent_receipts(self):
+        event = Event(group='')
+        self.bridge.observe(event)
+        payload = {'kind':'private','id':event.user,'message':'fixture only'}
+        for response in (None, True):
+            async def complete(origin, chain):
+                return response
+            self.context.send_message = complete
+            result = await self.bridge.send(payload)
+            self.assertEqual(result, {'_astrbot_send_completed': True})
+            self.assertNotIn('message_id', result)
+        for response in ({}, {'status':'failed','retcode':1}, {'message_id':'actual-fixture-id'}):
+            async def dictionary(origin, chain):
+                return response
+            self.context.send_message = dictionary
+            result = await self.bridge.send(payload)
+            self.assertEqual(result, response)
+            self.assertNotIn('_astrbot_send_completed', result)
+        async def reject(origin, chain):
+            return False
+        self.context.send_message = reject
+        with self.assertRaises(official.BridgeError):
+            await self.bridge.send(payload)
+        async def error(origin, chain):
+            raise RuntimeError('fixture failure')
+        self.context.send_message = error
+        with self.assertRaisesRegex(RuntimeError,'fixture failure'):
+            await self.bridge.send(payload)
 
     async def test_bare_binding_opens_tutorial_on_passive_and_proactive_cards(self):
         event = Event()
