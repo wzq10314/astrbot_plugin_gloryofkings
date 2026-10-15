@@ -105,7 +105,7 @@ function makeEvent(data){
   return e;
 }
 let entries=[], jobs=[], black, imStore, pushStore;
-const privateFiles=new Set(['campFriend.js','campIm.js','campImDeploy.js']);
+const privateFiles=new Set(['campFriend.js','campIm.js','campImDeploy.js','campPrivacy.js']);
 function matches(e){
   return entries.flatMap(([file,app])=>(app.rule||[]).filter(rule=>{
     if(rule.fnc==='tryQuote'&&(e.isGroup||!e.reply_id||!imStore.getRef(e.reply_id)))return false;
@@ -130,7 +130,7 @@ async function handle(x){
   return events.run(e,async()=>{
     for(const {file,app,rule} of matches(e)){
       if(e.isGroup&&(privateFiles.has(file)||rule.event==='message.private'||app.event==='message.private')){
-        await e.reply('营地好友和消息功能仅限私聊，请私聊机器人操作。');
+        await e.reply('营地好友、消息和隐私功能仅限私聊，请私聊机器人操作。');
         return {handled:true,messages:e.bridgeOutput};
       }
       if(!e.isGroup&&(rule.event==='message.group'||app.event==='message.group'))continue;

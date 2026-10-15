@@ -4,8 +4,8 @@ from pathlib import Path
 import re
 
 INVENTORY=json.loads((Path(__file__).resolve().parents[1]/'routes.json').read_text(encoding='utf-8'))
-PRIVATE_FILES={'campFriend.js','campIm.js','campImDeploy.js'}
-PRIVATE_NOTICE='营地好友和消息功能仅限私聊，请私聊机器人操作。'
+PRIVATE_FILES={'campFriend.js','campIm.js','campImDeploy.js','campPrivacy.js'}
+PRIVATE_NOTICE='营地好友、消息和隐私功能仅限私聊，请私聊机器人操作。'
 PRIVATE_RULES=[re.compile(r['reg'],re.I if 'i' in r['flags'] else 0)
                for a in INVENTORY if a['file'] in PRIVATE_FILES
                for r in a['rules'] if r['fnc']!='tryQuote']
@@ -17,7 +17,7 @@ BLOCKED_FILES={'astrbotManagement.js','campImDeploy.js','watchDeploy.js','blackL
                'cacheManager.js','campRenew.js','dataBackup.js','shareDeploy.js','shareNotify.js'}
 BLOCKED_METHODS={'tryQuote','clearAll','clearInvalidCampAuth','clearHiddenProfiles',
                  'setUrl','setToken','setAdminSecret','masterEnable','masterDisable','resync',
-                 'chat','reply'}
+                 'chat','reply','battleShortcut','setPrivacy'}
 RULES=[(a['file'],r,re.compile(r['reg'],re.I if 'i' in r['flags'] else 0))
        for a in INVENTORY for r in a['rules'] if r['fnc']!='tryQuote']
 ALIASES={'战绩':'查询战绩','查战绩':'查询战绩','我的战绩':'查询战绩','最近战绩':'查询战绩',
@@ -34,6 +34,6 @@ def normalize(command):
     for file,rule,pattern in RULES:
         if not pattern.search(text):continue
         if file in BLOCKED_FILES or rule['fnc'] in BLOCKED_METHODS:
-            raise ValueError('此操作请用户直接发送原版命令；配置凭据、部署、清理及对外私信不经 LLM 工具处理。')
+            raise ValueError('此操作请用户直接发送原版命令；配置凭据、部署、清理、隐私修改及对外私信不经 LLM 工具处理。')
         return text
     raise ValueError('命令名称未匹配，请按工具说明选择；这不代表相关功能不存在。')

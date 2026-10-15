@@ -152,19 +152,20 @@ privateDelegate=undefined;
 const apiSource=fs.readFileSync(path.join(plugin,'utils/api.js'),'utf8');
 const start=apiSource.indexOf('\nclass CampAuthSession {'),end=apiSource.indexOf('\nclass CampTransport {',start);
 assert.ok(start>=0&&end>start);
-const local=['111','222','333'].map(userId=>({source:'global',label:'fixture '+userId,auth:{userId,token:'fixture-token',userKey:'fixture-key'}}));
-const Session=new Function('authStore','Config','logger','AuthConfigError','toText','maskValue','maskUserId','isUsableAuth','DEFAULT_PUBLIC_KEY',
+const local=['111','222','333'].map(userId=>({source:'global',label:'fixture '+userId,auth:{userId,token:'fixture-token',userKey:'fixture-key',ownerBotUserId:'owner-'+userId}}));
+const Session=new Function('authStore','Config','logger','AuthConfigError','toText','maskValue','maskUserId','isUsableAuth','DEFAULT_PUBLIC_KEY','roleIdToCampId',
   apiSource.slice(start,end)+'\nreturn CampAuthSession;')(
-    {getAuthCandidates:()=>local,listAccounts:()=>local.map(x=>x.auth)},
-    {getDefOrConfig:()=>({gameAreaId:'2',userAgent:'fixture'})},logger,class extends Error{},v=>v==null?'':String(v),()=> '[masked]',()=> '[masked]',()=>true,'unused fixture');
+    {getAuthCandidates:()=>local,listAccounts:()=>local.map(x=>x.auth),
+      listGlobalAccountsByOwner:owner=>local.map(x=>x.auth).filter(account=>account.ownerBotUserId===owner)},
+    {getDefOrConfig:()=>({gameAreaId:'2',userAgent:'fixture'})},logger,class extends Error{},v=>v==null?'':String(v),()=> '[masked]',()=> '[masked]',()=>true,'unused fixture',new Map());
 const session=new Session();
 await check('self first preserves other candidates and input store',()=>{
-  const before=JSON.stringify(local);assert.equal(session.candidates('222')[0].auth.userId,'222');
-  assert.equal(session.candidates('333')[0].auth.userId,'333');assert.equal(session.candidates('222').length,3);
+  const before=JSON.stringify(local);assert.equal(session.candidates('222','owner-222')[0].auth.userId,'222');
+  assert.equal(session.candidates('333','owner-333')[0].auth.userId,'333');assert.equal(session.candidates('222','owner-222').length,3);
   assert.equal(JSON.stringify(local),before);
 });
 await check('non-pool target keeps rotation',()=>{
-  const firsts=Array.from({length:4},()=>session.candidates('999')[0].auth.userId);
+  const firsts=Array.from({length:4},()=>session.candidates('999','owner-111')[0].auth.userId);
   assert.ok(new Set(firsts).size>=2);
 });
 console.log(JSON.stringify({ok:true,checks,patched,network:'synthetic dependencies only; no business API or real message'}));

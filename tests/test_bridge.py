@@ -68,8 +68,8 @@ class Integration(unittest.IsolatedAsyncioTestCase):
         return result,self.bot.calls[start:]
 
     async def test_inventory_loads_all_upstream_apps_and_schedules(self):
-        self.assertEqual(len(self.bridge.inventory),45)
-        self.assertEqual(sum(len(a['rules']) for a in self.bridge.inventory),115)
+        self.assertEqual(len(self.bridge.inventory),46)
+        self.assertEqual(sum(len(a['rules']) for a in self.bridge.inventory),118)
         self.assertGreaterEqual(self.bridge.jobs,9)
         for app in self.bridge.inventory:
             self.assertTrue(app['rules'])
@@ -171,7 +171,7 @@ class Integration(unittest.IsolatedAsyncioTestCase):
         for command in commands:
             result,calls=await self.command(command,group='987654321',user='12345002',master=True)
             self.assertTrue(result['handled'],command)
-            self.assertEqual(result['messages'],['营地好友和消息功能仅限私聊，请私聊机器人操作。'])
+            self.assertEqual(result['messages'],['营地好友、消息和隐私功能仅限私聊，请私聊机器人操作。'])
             sends=[(a,p) for a,p in calls if a.startswith('send_')]
             self.assertEqual(len(sends),1)
             self.assertNotIn('private-fixture',json.dumps(calls))

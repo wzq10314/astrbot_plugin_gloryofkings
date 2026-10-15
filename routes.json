@@ -305,6 +305,31 @@
     "tasks": []
   },
   {
+    "file": "campPrivacy.js",
+    "name": "王者营地隐私",
+    "rules": [
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#?隐私(?:帮助|设置|状态|列表)\\s*(?:@[^#]*)?$",
+        "flags": "",
+        "fnc": "showPrivacy",
+        "permission": ""
+      },
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#?(隐藏|公开)我的战绩\\s*(?:@[^#]*)?$",
+        "flags": "",
+        "fnc": "battleShortcut",
+        "permission": ""
+      },
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#?隐私(公开|隐藏)\\s*(\\d*)\\s*(\\S*)\\s*(?:@[^#]*)?$",
+        "flags": "",
+        "fnc": "setPrivacy",
+        "permission": ""
+      }
+    ],
+    "tasks": []
+  },
+  {
     "file": "campRenew.js",
     "name": "王者营地登录续期",
     "rules": [

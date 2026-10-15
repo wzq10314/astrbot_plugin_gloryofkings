@@ -1,3 +1,10 @@
+## 2026-10-15 上游同步（AstrBot v1.0.19）
+
+- 上游固定到 `8b1ef1c53de6a9d2d9a687c9bcb0d00ddaf0761d`（2.0.0），共 265 个归档文件、46 个业务模块、118 条路由。
+- 新增营地隐私帮助与开关：私聊发送 `#隐私帮助`；隐私修改须由用户直接发送命令，不经 LLM 自动执行，也不作为查询失败后的自动操作。
+- 同步查询候选账号、自我查询识别、单账号池提示及战绩段位升降文案修复。
+- 保留已有 AstrBot、OneBot、QQ 官方、图片与签到适配；更新不主动执行签到、兑换、隐私写入或真实账号查询。
+
 ## 2026-10-14 上游同步（AstrBot v1.0.18）
 
 - 同步营地在线/断线图片消息、自动签到私聊出图和目标本人登录态优先查询。
@@ -16,7 +23,7 @@
 
 GloryOfKings-Plugin 的 AstrBot 适配版
 
-![Version](https://img.shields.io/badge/version-1.0.18-blue)
+![Version](https://img.shields.io/badge/version-1.0.19-blue)
 ![AstrBot](https://img.shields.io/badge/AstrBot-4.28.1%2B-purple)
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
 ![OneBot](https://img.shields.io/badge/OneBot11-NapCat-green)
@@ -30,7 +37,7 @@ GloryOfKings-Plugin 的 AstrBot 适配版
 
 这是基于 [longhengmu/GloryOfKings-Plugin](https://gitee.com/longhengmu/GloryOfKings-Plugin) 的业务核心适配项目，通过常驻 Node 核心对接 AstrBot 的消息、权限、数据目录及后台任务，并提供 `glory_of_kings` LLM 工具和 Python 依赖管理命令。当前打包的命令见 `routes.json`，各平台的可用范围见下文。
 
-本版上游基准提交：[`6fd4df4bdcbe`](https://gitee.com/longhengmu/GloryOfKings-Plugin/commit/6fd4df4bdcbe6a0e83a15301c7b436722b2a9b82)（2026-10-14），261 份上游文件的来源与摘要见 `UPSTREAM.json`。新增营地在线/断线补拉图片转发、自动签到私聊图片报告，并在查询时优先尝试目标账号本人的可用登录态；实际加载 45 个模块、115 条路由。QQ 官方平台适配、帮助按钮和可选的跨机器人查询登录态复用继续提供。
+本版上游基准提交：[`8b1ef1c53de6`](https://gitee.com/longhengmu/GloryOfKings-Plugin/commit/8b1ef1c53de6a9d2d9a687c9bcb0d00ddaf0761d)（2026-10-15），265 份上游文件的来源与摘要见 `UPSTREAM.json`。同步营地隐私指令、查询选号及段位升降提示修复；实际加载 46 个模块、118 条路由。QQ 官方平台适配、帮助按钮和可选的跨机器人查询登录态复用继续提供。
 
 > 观战直播、营地消息及共享库的客户端已接入。它们所需的服务端由上游作者单独分发，不包含在公开仓库中，需自行取得服务地址和接入令牌。本包没有伪造接口或附送私人密钥。营地游戏数据查询需要有效登录态，并受接口权限、隐私设置及频控影响；官网公告查询无需营地登录。
 
@@ -38,7 +45,7 @@ GloryOfKings-Plugin 的 AstrBot 适配版
 
 仓库地址：[https://github.com/wzq10314/astrbot_plugin_gloryofkings](https://github.com/wzq10314/astrbot_plugin_gloryofkings)。可在 AstrBot 插件管理中使用该 Git 仓库地址安装，或从 [Releases](https://github.com/wzq10314/astrbot_plugin_gloryofkings/releases) 下载 ZIP。
 
-1. 在 AstrBot 后台的插件管理中安装仓库，或上传 `astrbot_plugin_gloryofkings-v1.0.18.zip`，然后启用插件。
+1. 在 AstrBot 后台的插件管理中安装仓库，或上传 `astrbot_plugin_gloryofkings-v1.0.19.zip`，然后启用插件。
 2. 环境需要 **Python 3.12、Node.js 22+、npm**。Python 依赖随安装包安装，Node 依赖首次启动自动准备。已安装 RConsole 的机器可以复用系统 Node 和 Chromium；两个插件的数据、账号和依赖目录独立。
 3. 管理员私聊机器人发送 `#王者依赖状态`。浏览器就绪的判断包含一次真实启动和截图。未就绪时可发 `#王者浏览器安装`，依赖安装失败时可发 `#王者依赖安装`。
 4. 先发 `#王者帮助` 检查图片，再按下方步骤登录和绑定。

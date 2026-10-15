@@ -141,12 +141,23 @@ for (const context of contexts) for (const mode of modes) {
   });
 }
 
-await test('main help offers eight entry points without expanding their detailed commands', async () => {
-  assert.deepEqual(expectedPublic.map(section => section.list.length), [10, 6, 2, 2, 5, 2]);
+await test('main help preserves eight subhelp entries and adds one private privacy entry', async () => {
+  const privacyEntries = expectedPublic.flatMap(section => section.list
+    .filter(item => item.cmd === '#隐私帮助').map(item => ({section, item})));
+  assert.equal(privacyEntries.length, 1, 'Privacy has exactly one main-help entry');
+  const [{section: privacySection, item: privacyEntry}] = privacyEntries;
+  assert.equal(privacySection.title, '营地相关');
+  assert.match(privacyEntry.desc, /私聊/);
+  assert.deepEqual(privacyEntry.alias, ['#隐私设置', '#隐私状态']);
+  assert.deepEqual(expectedPublic.map(section => section.list
+    .filter(item => item.cmd !== '#隐私帮助').length), [10, 6, 2, 2, 5, 2],
+  'The existing grouping and all previous cards remain complete');
   const entries = expectedPublic.flatMap(section => section.list.map(item => item.cmd)).filter(command => command.endsWith('帮助'));
-  assert.deepEqual(entries, subhelps.map(section => section.entry));
+  assert.equal(entries.length, subhelps.length + 1);
+  assert.deepEqual(entries.filter(command => command !== '#隐私帮助'), subhelps.map(section => section.entry));
   const commands = allCommands(expectedPublic);
-  for (const detailed of ['#查询战绩', '#英雄详情', '#查皮肤', '#营地观战', '#营地消息', '#开启战绩推送', '#群日报']) {
+  for (const detailed of ['#查询战绩', '#英雄详情', '#查皮肤', '#营地观战', '#营地消息', '#开启战绩推送', '#群日报',
+    '#隐藏我的战绩', '#公开我的战绩', '#隐私隐藏', '#隐私公开']) {
     assert.ok(!commands.includes(detailed), `${detailed} belongs in its subhelp`);
   }
   assert.ok(commands.includes('#王者对比'));

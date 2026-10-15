@@ -16,7 +16,7 @@ from .services.tool_commands import normalize as normalize_tool_command
 from .services.tool_commands import private_only, PRIVATE_NOTICE
 
 
-@register('astrbot_plugin_gloryofkings', 'wzq10314', '王者营地全功能核心 AstrBot 适配', '1.0.17')
+@register('astrbot_plugin_gloryofkings', 'wzq10314', '王者营地全功能核心 AstrBot 适配', '1.0.19')
 class GloryOfKingsPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -241,6 +241,8 @@ class GloryOfKingsPlugin(Star):
         营地好友、营地消息、营地消息开、营地消息关；观战/消息需要作者的外置服务及登录态。
         王者公告不需要登录。观战大神使用全局账号池，发起人无需自己先登录，池中仍需有可用账号。
         营地好友及所有 IM 消息功能只能在私聊调用。群聊中请提示转到私聊，不能展示好友或消息内容。
+        隐私：隐私帮助、隐私设置、隐私状态、隐私列表仅可私聊查询；不显示菜单未证实的开关状态。
+        隐私公开/隐藏及隐藏/公开我的战绩会真实修改账号设置，只能请用户直接发送命令，不经 LLM 执行。
         共享：开启营地ID共享、关闭营地ID共享、营地ID共享状态。仅在用户明确要求共享时操作。
         帮助：王者帮助 [关键词]、查询战绩帮助、英雄相关帮助、皮肤帮助、营地ID共享帮助、
         营地观战帮助、营地消息帮助、战绩推送帮助、群战绩报告帮助、王者更新日志。
@@ -294,7 +296,7 @@ class GloryOfKingsPlugin(Star):
         if time.monotonic()-timestamp<300 and text: return text
         manifest=json.loads((Path(__file__).parent/'UPSTREAM.json').read_text(encoding='utf-8'))
         current=manifest['commit']
-        prefix=f'AstrBot 适配版 1.0.17\n上游：{manifest["repository"]}\n本版基准：{current[:12]}'
+        prefix=f'AstrBot 适配版 1.0.19\n上游：{manifest["repository"]}\n本版基准：{current[:12]}'
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15),trust_env=True) as client:
                 async with client.get('https://gitee.com/api/v5/repos/longhengmu/GloryOfKings-Plugin/commits',params={'sha':'master','per_page':5}) as response:

@@ -22,6 +22,8 @@ const writes = [];
 const authStore = {
   getAuthCandidates: () => local,
   listAccounts: () => local.map(candidate => candidate.auth),
+  listGlobalAccountsByOwner: owner => local.map(candidate => candidate.auth)
+    .filter(account => account.ownerBotUserId === owner),
   markAuthFailure: (userId, message) => { writes.push(['failure', userId, message]); return {newlyInvalid: false}; },
   markAuthSuccess: userId => { writes.push(['success', userId]); },
 };
@@ -30,12 +32,12 @@ const toText = value => value == null ? '' : String(value);
 const isUsableAuth = auth => Boolean(auth?.token && auth?.userId && (auth?.userKey || auth?.encodeRes));
 const CampAuthSession = new Function(
   'authStore', 'Config', 'readSharedQueryCandidates', 'logger', 'AuthConfigError',
-  'toText', 'maskValue', 'maskUserId', 'isUsableAuth', 'DEFAULT_PUBLIC_KEY',
+  'toText', 'maskValue', 'maskUserId', 'isUsableAuth', 'DEFAULT_PUBLIC_KEY', 'roleIdToCampId',
   `${classSource}\nreturn CampAuthSession;`,
 )(authStore, {getDefOrConfig: () => ({gameAreaId: '2', userAgent: 'fixture-agent'})},
   (...args) => { reads += 1; return readSharedQueryCandidates(...args); },
   {debug() {}, warn() {}}, AuthConfigError, toText, () => '[masked]', () => '[masked]',
-  isUsableAuth, 'fixture-unused-public-key');
+  isUsableAuth, 'fixture-unused-public-key', new Map());
 const session = new CampAuthSession();
 
 const privateFields = ['ownerBotUserId', 'userSig', 'accessToken', 'refreshToken', 'appOpenid',
