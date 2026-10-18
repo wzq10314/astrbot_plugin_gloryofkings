@@ -745,6 +745,49 @@
     ]
   },
   {
+    "file": "teamUp.js",
+    "name": "王者开黑组队",
+    "rules": [
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(发起开黑|开黑招人)\\s*(.*)$",
+        "flags": "",
+        "fnc": "create",
+        "permission": ""
+      },
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(加入开黑|加开黑)\\s*(.*)$",
+        "flags": "",
+        "fnc": "join",
+        "permission": ""
+      },
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#退出开黑\\s*(\\d{2})?$",
+        "flags": "",
+        "fnc": "leave",
+        "permission": ""
+      },
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#取消开黑\\s*(\\d{2})?$",
+        "flags": "",
+        "fnc": "close",
+        "permission": ""
+      },
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(开黑列表|开黑房间)$",
+        "flags": "",
+        "fnc": "list",
+        "permission": ""
+      },
+      {
+        "reg": "(?:^\\s*@[^#]*(?=#)|^)#(开启|关闭)开黑广播$",
+        "flags": "",
+        "fnc": "toggle",
+        "permission": "admin"
+      }
+    ],
+    "tasks": []
+  },
+  {
     "file": "watchBattle.js",
     "name": "王者营地观战",
     "rules": [
@@ -942,6 +985,12 @@
         "permission": ""
       },
       {
+        "reg": "^#(排位|巅峰)bot排名\\s*(刷新)?$",
+        "flags": "",
+        "fnc": "botRank",
+        "permission": ""
+      },
+      {
         "reg": "^#(排位|巅峰)排名\\s*(刷新)?$",
         "flags": "",
         "fnc": "groupRank",
@@ -977,6 +1026,19 @@
         "reg": "(?:^\\s*@[^#]*(?=#)|^)#(王者)?(常用英雄|英雄战力榜)\\s*(.*)$",
         "flags": "",
         "fnc": "heroList",
+        "permission": ""
+      }
+    ],
+    "tasks": []
+  },
+  {
+    "file": "heroPowerRank.js",
+    "name": "英雄战力总排名",
+    "rules": [
+      {
+        "reg": "^#(?!排位总排名|巅峰总排名)(.+?)\\s*总排名$",
+        "flags": "",
+        "fnc": "rank",
         "permission": ""
       }
     ],

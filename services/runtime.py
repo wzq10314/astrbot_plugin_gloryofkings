@@ -189,6 +189,16 @@ def prepare_runtime(engine: Path, destination: Path, settings: dict, host_blackl
     # New scheduled/social actions are opt-in in AstrBot; existing explicit values survive.
     defaults['campSignCron'] = ''
     defaults['campSignAutoTask'] = False
+    # New cross-bot contact sharing is opt-in; never populate the author's endpoint.
+    defaults['distUrl'] = ''
+    defaults['teamUpEnabled'] = False
+    defaults['teamBroadcastGroups'] = []
+    template = yaml.safe_load((target / 'config/default_config/config.yaml').read_text(encoding='utf-8'))
+    template['distUrl'] = ''
+    template['teamUpEnabled'] = False
+    template['teamBroadcastGroups'] = []
+    (target / 'config/default_config/config.yaml').write_text(
+        yaml.safe_dump(template, allow_unicode=True, sort_keys=False), encoding='utf-8')
     config_file = target / 'config/config/config.yaml'
     config_file.parent.mkdir(parents=True, exist_ok=True)
     current = yaml.safe_load(config_file.read_text(encoding='utf-8')) if config_file.exists() else {}

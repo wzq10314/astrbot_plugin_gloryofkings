@@ -324,7 +324,7 @@ export function supportGuoba () {
         {
           field: 'config.distUrl',
           label: '分发服务地址',
-          bottomHelpMessage: '观战和营地消息的服务端从这里下载。留空 = 还没接入，进群 972915804 找主人要。',
+          bottomHelpMessage: '观战、营地消息的服务端从这里下载，开黑房间也走它。已填好公共入口，一般不用改。',
           component: 'Input',
           componentProps: {
             placeholder: 'http://你的域名:6868'
@@ -339,6 +339,25 @@ export function supportGuoba () {
           componentProps: {
             placeholder: 'gok_1_xxxxxxxx'
           }
+        },
+        {
+          field: 'config.teamUpEnabled',
+          label: '跨机器人开黑',
+          bottomHelpMessage:
+            '接了上面的分发服务就能用 #发起开黑 / #加入开黑，和别的机器人共享房间池。' +
+            '开黑播报默认不发到任何群，要收的群在下面勾上。',
+          component: 'Switch'
+        },
+        {
+          field: 'config.teamBroadcastGroups',
+          label: '收开黑播报的群',
+          bottomHelpMessage:
+            '只有勾上的群收开黑播报（有人发起、人齐了）。' +
+            '和群管理在群里发 #开启开黑广播 / #关闭开黑广播 是同一份设置，两处都能改。',
+          component: 'GSelectGroup',
+          // 群多选默认走整行（label 在上、控件占满），但这个 label 短，
+          // 走常规的「标签左、控件右」才和上下的字段对得齐
+          block: false
         },
         {
           field: 'config.dependencyRegistry',

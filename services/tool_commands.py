@@ -33,7 +33,8 @@ def normalize(command):
     text='#'+text
     for file,rule,pattern in RULES:
         if not pattern.search(text):continue
-        if file in BLOCKED_FILES or rule['fnc'] in BLOCKED_METHODS:
+        if (file in BLOCKED_FILES or rule['fnc'] in BLOCKED_METHODS or
+                (file == 'teamUp.js' and rule['fnc'] != 'list')):
             raise ValueError('此操作请用户直接发送原版命令；配置凭据、部署、清理、隐私修改及对外私信不经 LLM 工具处理。')
         return text
     raise ValueError('命令名称未匹配，请按工具说明选择；这不代表相关功能不存在。')

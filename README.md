@@ -1,3 +1,13 @@
+## 2026-10-18 上游同步（AstrBot v1.0.20）
+
+- 上游固定到 `7187b9eefba0cb27a6b2131ba11e03a0550ef404`（2.0.0），归档 278 个文件，实际核心加载 48 个模块、126 条路由。
+- 同步英雄战力总排名的领奖台、游戏头像和全量英雄扫描，以及我的英雄本赛季战力、战绩详情头像与战力变化。
+- 新增 `#妲己总排名` / `#元法总排名`、`#排位bot排名` / `#巅峰bot排名`；排位/巅峰总排名可在既有显式共享库设置下补充数据。
+- 新增开黑组队：`#发起开黑 打野 缺辅助 3排`、`#加入开黑 12 辅助`、`#退出开黑 12`、`#取消开黑 12`、`#开黑列表`。需要管理员先配置自己的服务及令牌，并打开 `teamUpEnabled`。默认关闭，不自动接入作者服务器、不自动广播。
+- 广播只发 `teamBroadcastGroups` 白名单群；当前群管理员可用 `#开启开黑广播` / `#关闭开黑广播`。发起/加入会将该用户的组队及联系资料发给已配置服务，联系资料走私聊；跨机器人配对需要该服务已支持新版开黑 API。
+- LLM 新增英雄总排名、bot 排名和开黑列表；开黑写入和广播管理要求用户直接命令，不经 LLM 自动代发。
+- 保留 QQ 官方/OneBot 登录、用户隔离、查询权限、全皮肤分页、菜单、营地消息及隐私修复；更新不自动查询真实账号、发送组队消息或修改账号隐私。
+
 ## 2026-10-15 上游同步（AstrBot v1.0.19）
 
 - 上游固定到 `8b1ef1c53de6a9d2d9a687c9bcb0d00ddaf0761d`（2.0.0），共 265 个归档文件、46 个业务模块、118 条路由。
@@ -23,7 +33,7 @@
 
 GloryOfKings-Plugin 的 AstrBot 适配版
 
-![Version](https://img.shields.io/badge/version-1.0.19-blue)
+![Version](https://img.shields.io/badge/version-1.0.20-blue)
 ![AstrBot](https://img.shields.io/badge/AstrBot-4.28.1%2B-purple)
 ![Python](https://img.shields.io/badge/Python-3.12-blue)
 ![OneBot](https://img.shields.io/badge/OneBot11-NapCat-green)

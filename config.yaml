@@ -64,3 +64,7 @@ gameNewsCron: '0 53 */2 * * *'
 # Leave both fields empty unless an administrator has configured this feature.
 official_query_auth_namespace: ""
 official_query_auth_accounts: []
+
+# 新增跨机器人开黑默认不自动启用，管理员确认服务与联系人共享后手动开启
+teamUpEnabled: false
+teamBroadcastGroups: []

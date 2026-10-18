@@ -300,5 +300,15 @@
     "description": "签到同时做浏览/点赞/分享福利任务并领取奖励（含真实点赞，默认关闭）",
     "type": "bool",
     "default": false
+  },
+  "teamUpEnabled": {
+    "description": "跨机器人开黑组队（默认关闭，需要配置自己的分发服务地址和令牌；用户直接命令发起/加入时将向服务共享联系人资料）",
+    "type": "bool",
+    "default": false
+  },
+  "teamBroadcastGroups": {
+    "description": "接收开黑广播的群ID白名单，默认空；也可由当前群管理员发 开启开黑广播 设置",
+    "type": "list",
+    "default": []
   }
 }

@@ -58,7 +58,10 @@ const COPY_FILES = [
   // hiddenProfiles 依赖 fileUtils 的 readJsonFile/writeJsonFile 与 safeStore 的 quarantineCorrupt，
   // 两个都必须在清单里，少一个就是 ERR_MODULE_NOT_FOUND。
   'utils/hiddenProfiles.js',
-  'utils/fileUtils.js'
+  'utils/fileUtils.js',
+  // 开黑的本地状态表（test/teamStore.test.mjs 用）。import 了 #utils 的 yaml 读写
+  // 与 safeStore 的 quarantineCorrupt，后者已经在上面
+  'utils/teamStore.js'
 ]
 
 /** 测试用的假配置。地址/令牌都是假的，绝不碰真凭证 */
@@ -115,13 +118,22 @@ export function makeSandbox () {
     'utf8'
   )
 
-  // 假的 #components：只提供被 import 到的那几个名字
+  // 假的 #components：只提供被 import 到的那几个名字。
+  // `Config.modify` 是给 teamStore 的群开关用的（它把「开着的群」写进配置），
+  // 写进上面那个可改的内部状态，测试里读得回来；
+  // `failNextModify` 让下一次写入抛错，用来验「写盘失败」那条路。
   fs.writeFileSync(path.join(root, 'test-components.mjs'), [
-    `import { fakeConfig } from './fake-config.mjs'`,
+    `import { fakeConfig, setFakeConfig, takeModifyFailure } from './fake-config.mjs'`,
     `export const PluginPath = ${JSON.stringify(path.join(root, 'PluginRoot'))}`,
     `export const PluginData = ${JSON.stringify(path.join(root, 'PluginRoot', 'data'))}`,
     `export const PluginName = 'GloryOfKings-Plugin-Test'`,
-    `export const Config = { getDefOrConfig: () => fakeConfig() }`,
+    `export const Config = {`,
+    `  getDefOrConfig: () => fakeConfig(),`,
+    `  modify: (name, key, value) => {`,
+    `    if (takeModifyFailure()) throw new Error('测试：写盘失败')`,
+    `    setFakeConfig({ [key]: value })`,
+    `  }`,
+    `}`,
     ''
   ].join('\n'), 'utf8')
 
@@ -129,13 +141,22 @@ export function makeSandbox () {
   //    测试脚本里 `fake.fakeConfig = ...` 会直接抛 TypeError
   fs.writeFileSync(path.join(root, 'fake-config.mjs'), [
     `let cfg = ${JSON.stringify(FAKE_CONFIG)}`,
+    `let failNext = false`,
     'export function fakeConfig () { return { ...cfg } }',
     'export function setFakeConfig (next) { cfg = { ...cfg, ...next } }',
+    '/** 让下一次 Config.modify 抛错（模拟磁盘满 / 文件只读） */',
+    'export function failNextModify (v) { failNext = !!v }',
+    'export function takeModifyFailure () { const v = failNext; failNext = false; return v }',
     ''
   ].join('\n'), 'utf8')
 
-  // 假的 #utils（unit 测试目前用不到，留着防未来 import）
-  fs.writeFileSync(path.join(root, 'test-utils.mjs'), 'export function shouldQuote () { return false }\n', 'utf8')
+  // 假的 #utils：单测用得到的只有 yaml 读写（开黑状态表走它）。
+  // 转的是沙箱里那份真 yamlUtils，所以读写的还是真实现。
+  fs.writeFileSync(path.join(root, 'test-utils.mjs'), [
+    `export { readYamlFile, writeYamlFile } from './utils/yamlUtils.js'`,
+    'export function shouldQuote () { return false }',
+    ''
+  ].join('\n'), 'utf8')
 
   // 假的 node-fetch：只保证 import 成功，被调用就抛（测试不该发真请求）
   fs.writeFileSync(path.join(root, 'test-node-fetch.mjs'), [

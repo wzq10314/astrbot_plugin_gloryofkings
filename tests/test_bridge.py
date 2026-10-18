@@ -68,8 +68,8 @@ class Integration(unittest.IsolatedAsyncioTestCase):
         return result,self.bot.calls[start:]
 
     async def test_inventory_loads_all_upstream_apps_and_schedules(self):
-        self.assertEqual(len(self.bridge.inventory),46)
-        self.assertEqual(sum(len(a['rules']) for a in self.bridge.inventory),118)
+        self.assertEqual(len(self.bridge.inventory),48)
+        self.assertEqual(sum(len(a['rules']) for a in self.bridge.inventory),126)
         self.assertGreaterEqual(self.bridge.jobs,9)
         for app in self.bridge.inventory:
             self.assertTrue(app['rules'])

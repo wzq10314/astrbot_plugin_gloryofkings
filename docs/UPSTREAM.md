@@ -2,11 +2,11 @@
 
 指定上游固定为 https://gitee.com/longhengmu/GloryOfKings-Plugin ，默认 master。不要误切到原作者仓库或其他 fork。
 
-本次 AstrBot v1.0.19 基准为 8b1ef1c53de6a9d2d9a687c9bcb0d00ddaf0761d（2026-10-15，上游 2.0.0）：营地隐私指令、查询候选账号及段位升降文案修复。
+本次 AstrBot v1.0.20 基准为 7187b9eefba0cb27a6b2131ba11e03a0550ef404（2026-10-18，上游 2.0.0）：英雄战力总排名、开黑组队、共享排名与头像展示。上一版 v1.0.19 基准 8b1ef1c53de6a9d2d9a687c9bcb0d00ddaf0761d 的隐私与查询修复保留。
 
 ## 适配边界
 
-engine/upstream 归档 265 个上游文件，UPSTREAM.json 包含各文件 SHA-256，维护时按清单核对。适配位于 engine/worker.mjs、renderer.mjs、management.mjs，以及 Python services/、main.py。runtime.py 在运行目录应用有锚点检查的部署依赖和错误提示补丁，不修改归档的上游源码。
+engine/upstream 归档 278 个上游文件，UPSTREAM.json 包含各文件 SHA-256，维护时按清单核对。适配位于 engine/worker.mjs、renderer.mjs、management.mjs，以及 Python services/、main.py。runtime.py 在运行目录应用有锚点检查的部署依赖和错误提示补丁，不修改归档的上游源码。
 
 首次启动把受跟踪源码复制到 plugin_data 下的运行目录，建立 lib/puppeteer、lib/common、plugins/other/update 适配入口。源码更新只覆盖清单中的文件，保留 data、config/config、server、server-im。插件安装目录中不存放用户登录态。
 
@@ -44,3 +44,5 @@ python scripts/stage_upstream.py --checkout /path/to/GloryOfKings-Plugin --stage
 运行副本的部署错误提示使用 `engine/deploy-errors.mjs`：固定分类、主机名脱敏，不将原始异常或 URL 凭据回显，不建议因证书失败而降低传输安全。修改上游相关函数时必须同步检查运行时注入锚点与失败用例。
 
 营地隐私指令只在私聊处理。LLM 可读取隐私帮助，但 `setPrivacy` / `battleShortcut` 只接受用户直接发出的命令；更新测试不修改真实账号隐私。
+
+开黑 `teamUpEnabled` 默认 false、`teamBroadcastGroups` 默认空。运行模板仅清空上游作者的默认 distUrl，不覆盖现有用户值；新服务需管理员显式配置。新版 team/hero 排名外部 API 需服务端同时支持，纯源码更新不代表这些私有服务已完成真实联调。
