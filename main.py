@@ -16,7 +16,7 @@ from .services.tool_commands import normalize as normalize_tool_command
 from .services.tool_commands import private_only, PRIVATE_NOTICE
 
 
-@register('astrbot_plugin_gloryofkings', 'wzq10314', '王者营地全功能核心 AstrBot 适配', '1.0.20')
+@register('astrbot_plugin_gloryofkings', 'wzq10314', '王者营地全功能核心 AstrBot 适配', '1.0.21')
 class GloryOfKingsPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)

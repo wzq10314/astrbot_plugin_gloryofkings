@@ -310,5 +310,10 @@
     "description": "接收开黑广播的群ID白名单，默认空；也可由当前群管理员发 开启开黑广播 设置",
     "type": "list",
     "default": []
+  },
+  "shareRosterUploadEnabled": {
+    "description": "全量绑定上报 默认关闭 开启后会把本机所有数字QQ用户ID 营地ID列表和当前营地ID发送至你配置的共享库 仅在明确需要全库排行榜时由主人自行开启 不影响原有用户主动分享",
+    "type": "bool",
+    "default": false
   }
 }

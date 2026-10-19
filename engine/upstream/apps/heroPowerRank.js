@@ -1,5 +1,5 @@
 import puppeteer from '../../../lib/puppeteer/puppeteer.js'
-import { getImgType, shouldQuote, stripAtText } from '#utils'
+import { getImgType, shouldQuote, stripAtText, fetchSharedRoster, uploadLocalBindings } from '#utils'
 import ApiService from '../utils/api.js'
 import { dedupeTargets } from '../utils/rankStore.js'
 import { isHeroPowerReady, queryHeroPowerRank } from '../utils/heroPowerShare.js'
@@ -23,7 +23,7 @@ import { isHeroPowerReady, queryHeroPowerRank } from '../utils/heroPowerShare.js
 const HERO_IMG_BASE = 'https://game-1255653016.file.myqcloud.com/battle_skin_1250-326'
 
 /** 最多展示多少人 */
-const MAX_ROWS = 50
+const MAX_ROWS = 20
 
 /** 现查结果缓存：24 个绑定扫一遍实测 28 秒左右，5 分钟内重复查直接复用 */
 const CACHE_TTL_MS = 5 * 60 * 1000
@@ -93,12 +93,35 @@ async function scanOne (campId, botUserId, heroName) {
  * 营地那边的登录池打满。分批是这两个约束的折中。
  */
 async function scanBindings (heroName) {
-  const targets = [...dedupeTargets()]
+  const targets = new Map(dedupeTargets())
+
+  // 英雄榜也要覆盖别的机器人的人：先把本机绑定整表推上去，再拉全库营地ID 名单。
+  // 共享库挂了就只扫本机，不能影响出图。
+  try {
+    await Promise.race([
+      uploadLocalBindings().catch(() => {}),
+      new Promise(resolve => {
+        const timer = setTimeout(resolve, 3000)
+        timer.unref?.()
+      })
+    ])
+
+    const roster = await fetchSharedRoster()
+    if (roster.ok) {
+      for (const campId of roster.campIds) {
+        if (!targets.has(String(campId))) targets.set(String(campId), '')
+      }
+    }
+  } catch {
+    // 共享库不可用，按本机绑定查
+  }
+
+  const list = [...targets]
   const rows = []
   const CONCURRENCY = 3
 
-  for (let i = 0; i < targets.length; i += CONCURRENCY) {
-    const batch = targets.slice(i, i + CONCURRENCY)
+  for (let i = 0; i < list.length; i += CONCURRENCY) {
+    const batch = list.slice(i, i + CONCURRENCY)
     const results = await Promise.all(
       batch.map(([campId, botUserId]) => scanOne(campId, botUserId, heroName))
     )

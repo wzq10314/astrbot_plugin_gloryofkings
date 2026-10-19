@@ -8,6 +8,20 @@ import yaml
 from .pm2_compat import adapt_pm2
 
 
+def adapt_roster_upload_consent(source: str) -> str:
+    """Keep vendor sources exact; bulk sharing needs an independent owner opt-in."""
+    anchor = "export async function uploadLocalBindings (force = false) {\n  const cfg = readShareConfig()"
+    replacement = """export async function uploadLocalBindings (force = false) {
+  // AstrBot: individual opt-in sharing must not silently become full-roster sharing.
+  if (Config.getDefOrConfig('config')?.shareRosterUploadEnabled !== true) {
+    return { ok: false, skipped: true, message: '未启用全量绑定上报' }
+  }
+  const cfg = readShareConfig()"""
+    if source.count(anchor) != 1:
+        raise ValueError('Upstream roster upload consent hook changed')
+    return source.replace(anchor, replacement)
+
+
 def adapt_deploy_errors(source: str, helper: Path) -> str:
     """Replace network diagnostics only in the runtime copy; upstream stays exact."""
     replacements = (
@@ -155,6 +169,9 @@ def prepare_runtime(engine: Path, destination: Path, settings: dict, host_blackl
     private_msg = target / 'utils/privateMsg.js'
     private_msg.write_text(adapt_private_receipts(private_msg.read_text(encoding='utf-8')),
                           encoding='utf-8')
+    share_store = target / 'utils/shareStore.js'
+    share_store.write_text(adapt_roster_upload_consent(share_store.read_text(encoding='utf-8')),
+                           encoding='utf-8')
     help_file = target / 'apps/help.js'
     help_source = help_file.read_text(encoding='utf-8')
     for command in ('#开启王者自动签到', '#关闭王者自动签到'):
@@ -193,10 +210,12 @@ def prepare_runtime(engine: Path, destination: Path, settings: dict, host_blackl
     defaults['distUrl'] = ''
     defaults['teamUpEnabled'] = False
     defaults['teamBroadcastGroups'] = []
+    defaults['shareRosterUploadEnabled'] = False
     template = yaml.safe_load((target / 'config/default_config/config.yaml').read_text(encoding='utf-8'))
     template['distUrl'] = ''
     template['teamUpEnabled'] = False
     template['teamBroadcastGroups'] = []
+    template['shareRosterUploadEnabled'] = False
     (target / 'config/default_config/config.yaml').write_text(
         yaml.safe_dump(template, allow_unicode=True, sort_keys=False), encoding='utf-8')
     config_file = target / 'config/config/config.yaml'

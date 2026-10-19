@@ -68,3 +68,5 @@ official_query_auth_accounts: []
 # 新增跨机器人开黑默认不自动启用，管理员确认服务与联系人共享后手动开启
 teamUpEnabled: false
 teamBroadcastGroups: []
+
+shareRosterUploadEnabled: false

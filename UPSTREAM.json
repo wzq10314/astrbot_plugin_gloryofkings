@@ -1,9 +1,9 @@
 {
   "repository": "https://gitee.com/longhengmu/GloryOfKings-Plugin",
   "branch": "master",
-  "commit": "7187b9eefba0cb27a6b2131ba11e03a0550ef404",
+  "commit": "c203c73bd9386564a3de16886771b3c3caa3c763",
   "version": "2.0.0",
-  "retrieved_at": "2026-10-18T04:09:59.768680+00:00",
+  "retrieved_at": "2026-10-19T03:27:17.496175+00:00",
   "files": {
     ".githooks/pre-push": "849891cef81201e53f4a06ba602d13c6b7ac5397c17daefa5829c91d897c8fca",
     ".gitignore": "70b5fb8df4a13e5e0f899bbfc92388f40120d5e1b7cf0ac1ec4475f018718a22",
@@ -32,7 +32,7 @@
     "apps/heroGuideAlias.js": "9d71dbedce6c4f0a64c5078a277a5b91a5f9df1a0481b96c2e7a2f18460d1c24",
     "apps/heroList.js": "145f914b0d2dafbd966b817e7741a04323012f2e13d2e38763a2c71e6489b21f",
     "apps/heroMedalWall.js": "8f113837a6e78ad4d340733aedd838246f5fedc0db8f28d017025e86725dfef4",
-    "apps/heroPowerRank.js": "caab3ea3dcf55688eca4c64d5e21505e54ac71a7555613b02fc5754915327dad",
+    "apps/heroPowerRank.js": "a0c2e293adc3715bcab33dedf7abb39ad3690735ed5e872f10ecd67f057cd344",
     "apps/heroSkin.js": "359d4407026e06ba136c3fe276e264a28a8704020c16fcba3e136485b055144e",
     "apps/heroTierList.js": "9853105899e8363e9a7fb735cdc6f6edc43180138f996c45c822193a305feb76",
     "apps/kingCompare.js": "4f117e334bc3ce73f233a13cbe533f7b19311dd11e1dc5ce3b4323e376b24380",
@@ -40,7 +40,7 @@
     "apps/myKingHomepage.js": "2f9e6e39bb71dc73fb8e824a02eae51bfc211d4eb320e9df3b6cb1ac03ae47d0",
     "apps/peakPerformance.js": "fee9559ab5a149e1cf795ee7e9e0181cc952dcc48cad29177b683dc9b0cb6f17",
     "apps/queryGameStats.js": "eb5097f29ff01d8264e86c744477185ec081541d096b4d5d227e61a9c19a12b5",
-    "apps/rankList.js": "247c0eeb52ae4ee57187a9b25dcfa2a5b61f14c3edf1afb88db484ad45512e80",
+    "apps/rankList.js": "ab139aac90c17adca7c9caef35b9f4c5d85783cff7063eb2a140fc6078b34053",
     "apps/rankTrend.js": "b95e7b463284bf2d7409900488651f4bb486e51d3a503dc8f66c8a064bfea0c0",
     "apps/scoreTrend.js": "7e1b21cff7c427e947058b35bbb98b465abc15b7eeb58568523660efcea97af5",
     "apps/seasonPage.js": "1e72fe18215d008c159e8ad3057d389a852b1226a08902005bea205c0e8c7996",
@@ -50,7 +50,7 @@
     "apps/signIn.js": "6475e2c7cc84e6b67d2253f09f695c0db28f9e973146c0d1662ade2b90724f46",
     "apps/skinMissing.js": "d166a973541923f838c7526a55dbe36c9915ffa7824690099f7691b5f61957a6",
     "apps/skinNews.js": "8c88ace881131d8c18c6194727b78f7df6b37fd984f6851c0211011ee9ce7088",
-    "apps/skinWall.js": "980958930bc7c2a3ac9005a44b1f98f00ff89f515a80c626d2ee6bc3587a827d",
+    "apps/skinWall.js": "d0aab838324572f5c84bbd43f7abcd4285310be40d9c1703a0703b13bc15181e",
     "apps/teamUp.js": "2b02f4ef24d4654521cac5e5a99edab3b67b9ad41ffcf9a5fe40cae6ff744958",
     "apps/update.js": "74240db979e2376587a32fc410532bdd7468352b60c03b0306549319f6bb20a5",
     "apps/watchBattle.js": "517e3d004bfe6d1003b90af39883296a78681bd8d1fc754d9b7651b661c6b91f",
@@ -182,7 +182,7 @@
     "resources/img/skin/10807.jpg": "11814f52a5f81ce8028722c2b39762a11318784bd905368f552c04cffe18c09b",
     "resources/img/star.png": "d3da91571def4fbe548b5bff11614679903ebb3176feb3d407e539add764561b",
     "resources/img/svp.png": "e6fe5442d9b64359f6bdde1215869254ffb2304b0610ff523ab0c98d9f8f66ae",
-    "resources/img/营地ID获取.png": "c1cee4d5ea8cf0b1ae7eb9100c0ddb805ac306e9697cf4d4e0f81aec450de087",
+    "resources/img/\u8425\u5730ID\u83b7\u53d6.png": "c1cee4d5ea8cf0b1ae7eb9100c0ddb805ac306e9697cf4d4e0f81aec450de087",
     "resources/th.png": "b15d16f1892013f253552c3b6e395fd7c5b13fa75baeae7be3bf3ed9413c2255",
     "test/auditFixes.test.mjs": "eecb7e42ed76bab3d90afcc073ee2594558fecf44ab5c15fe227fa03779a5031",
     "test/auditFixes2.test.mjs": "530f08d78e6e824f430ead72de229bdca52ec1ffc975a30e34868e6e473bf897",
@@ -230,7 +230,7 @@
     "utils/campTask.js": "c6fe1e45561e798996f6010067a829642a9846f78f67d2ef36eee550f9597999",
     "utils/dependency.js": "0bf34c37429e408671df7f07719b5fc695605ed24446263ff5d98e58ecfadbec",
     "utils/deploy.js": "889e877b1747e4be229887a714d05ceca34bc123d0808f59b26d2c00c083b9f7",
-    "utils/fileUtils.js": "ed6f5b63f87bc4a50f35f9df5f885264566b35c4ba9dce7417d93b5bfc5a224e",
+    "utils/fileUtils.js": "0b38709db1fe4620f66de7b8a24b9c6dfa0c9d2e6f800a00696d047a4c363569",
     "utils/gameNews.js": "983910dc56e12344c73fdffb0ea716260b095cdb216fd7efc9bf830c3d84688f",
     "utils/groupIndex.js": "16c1a72759ef3091a6f5e1026bc7a044ca0ad131217e6e58a0d838bca28d7396",
     "utils/groupReportStore.js": "7891c4634782fc4d9f12c82bbe390c4aed6caf556b07edd926ae06ea7eecfc40",
@@ -242,7 +242,7 @@
     "utils/hiddenProfiles.js": "968108e3998b7ebfc0548869467ec7953b73f512ee0a39a1f74ce37d243c70f3",
     "utils/hotState.js": "c019b98669202f56f6a48284ccd3dea8d518e536ccedca1cdcda73dcd837b1ae",
     "utils/imageType.js": "a7d30f0e8494c2ec21556d0d62416f87305ec1ee344d353297dc217944929dd3",
-    "utils/index.js": "d306c2049e245803c1db699eeeebde4791582cbffc8706d05637f15f84b7134a",
+    "utils/index.js": "fdfe2c4d0ea9d83eb28e817d4f220cb7ea6d6bb5111c7480a07b30c3eff06b7d",
     "utils/localBind.js": "aea8e553e3f2feb7d01f98599d0b6c28ee0a09423070e6dab2cdc50a392fbd8d",
     "utils/masterMsg.js": "b9b02d2bc19e362fd5fc3cee1eca5449888b21d3b0e5f29893da88559da73f56",
     "utils/masterPanel.js": "834c2057af3583d7e27033780eca26c3ed21d431470cc2ecfb1880eb9c90b5b3",
@@ -255,7 +255,7 @@
     "utils/pvpSkinImage.js": "aff9447177de9003070e787652bb148510a79602f0bb846c9ca5ea0a24b6fc9c",
     "utils/qqLogin.js": "43adb75f51df37c24e0f5472d88b61559c820d9fe2f9046678623518683ff60e",
     "utils/quoted.js": "3043507ea824b5335216d55f2ab90f8106d44dc1e36c8487e2a8d1a83154b924",
-    "utils/rankStore.js": "bbb3b757b4216a2f1d5e8e353844246f8630214d41b24e70458967e37207e990",
+    "utils/rankStore.js": "22bf95bf3ebf35f91c9557235eeff9ceade92ad107362cdf42341730c65558de",
     "utils/rankTrend.js": "3d360903da91125b37a976d7dec97812d13f2820b1aef248ebe3a226a2fe0a74",
     "utils/rateLimitNotice.js": "a6bb8c70e3c9896a341e20621d2088f8080d49a559364f75f2847b01407e2a55",
     "utils/remoteAccounts.js": "933281a19ed4ddac16f864b16a26276f61a61fafadc1e4c69d711f16dfd9d967",
@@ -266,7 +266,7 @@
     "utils/seasonFallback.js": "391f091badc08183ed0da1eeff0c629b8780864cbcc9f1da08d5d9b0efd661e6",
     "utils/shareDefaults.js": "2a2fcd8022999d63aade12b586dec718e92feaaacf710627bebe3387a20c65bc",
     "utils/shareNotifyState.js": "7397e6e14cf16f2ee32c7f98d831d8844cdfaeca9b460def8c1b9757a791beae",
-    "utils/shareStore.js": "1e79cba7f5815b2a6aa5776930064a8f6f9025e8c90fd39a4393d8ca2a348ad9",
+    "utils/shareStore.js": "862dbb2210fe0d07f9b0f37d6fd3fbc62e2111d3ed5e297a5fbc58bd7437c98f",
     "utils/shareUsers.js": "3ffb35f38268c5994ae70774102a88f1d17e03ae3ed3a63752ccfed56508e674",
     "utils/signReportTarget.js": "4b214c5fbcc4626149eb11231ee908eb6e866b475035ccec188ea56b4e5fd0d4",
     "utils/skinCatalog.js": "403d0d4e6f958f178ad95981a29eaa30c52f9e54fe5c8c1f3b6795aabb0186a8",
@@ -283,5 +283,14 @@
     "webadapter/index.js": "b1ee110a3f83c8ea7e72178dfff0e62228e8498feaa2e3db359a6d550ea95506",
     "webadapter/page.css": "2f61796db0b9a1a4bada17f74b4f08a69941c032b281a43a3ed5a1c1028c7b55",
     "webadapter/page.html": "1625326907aa07e6bc0905df6f62b72eb0ce85c00c26a658f709f7ecc8a8fc93"
-  }
+  },
+  "patches": [
+    {
+      "name": "shared-roster-public-token",
+      "upstream_commit": "344c2c6b76c8cfa9e8b4c0575f65950b916cccde",
+      "files": [
+        "utils/shareStore.js"
+      ]
+    }
+  ]
 }
