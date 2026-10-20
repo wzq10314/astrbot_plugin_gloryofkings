@@ -29,8 +29,10 @@ class October20SourceManifest(unittest.TestCase):
         self.assertEqual(json.loads(encoded.decode('utf-8')), self.manifest)
 
     def test_public_roster_patch_hash_is_pinned(self):
-        patches = self.manifest.get('patches', [])
-        self.assertTrue(any(p.get('name') == 'shared-roster-public-token' for p in patches))
+        self.assertEqual(self.manifest['commit'], '344c2c6b76c8cfa9e8b4c0575f65950b916cccde')
+        self.assertEqual(self.manifest.get('patches', []), [])
+        adopted = self.manifest.get('adopted_patches', [])
+        self.assertTrue(any(p.get('name') == 'shared-roster-public-token' for p in adopted))
         relative = 'utils/shareStore.js'
         source = (ROOT / 'engine' / 'upstream' / relative).read_text(encoding='utf-8')
         self.assertIn('/api/v1/roster', source)

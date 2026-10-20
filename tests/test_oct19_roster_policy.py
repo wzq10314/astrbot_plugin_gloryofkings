@@ -66,7 +66,7 @@ class October19RosterPolicy(unittest.TestCase):
 
     def test_vendor_files_match_pinned_manifest(self):
         up = json.loads((ROOT/'UPSTREAM.json').read_text(encoding='utf-8'))
-        self.assertEqual(up['commit'], 'c203c73bd9386564a3de16886771b3c3caa3c763')
+        self.assertEqual(up['commit'], '344c2c6b76c8cfa9e8b4c0575f65950b916cccde')
         for name, expected in up['files'].items():
             with self.subTest(name=name):
                 self.assertEqual(hashlib.sha256((ROOT/'engine/upstream'/name).read_bytes()).hexdigest(), expected)

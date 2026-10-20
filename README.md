@@ -47,7 +47,7 @@ GloryOfKings-Plugin 的 AstrBot 适配版
 
 这是基于 [longhengmu/GloryOfKings-Plugin](https://gitee.com/longhengmu/GloryOfKings-Plugin) 的业务核心适配项目，通过常驻 Node 核心对接 AstrBot 的消息、权限、数据目录及后台任务，并提供 `glory_of_kings` LLM 工具和 Python 依赖管理命令。当前打包的命令见 `routes.json`，各平台的可用范围见下文。
 
-本版上游基准提交：[`8b1ef1c53de6`](https://gitee.com/longhengmu/GloryOfKings-Plugin/commit/8b1ef1c53de6a9d2d9a687c9bcb0d00ddaf0761d)（2026-10-15），265 份上游文件的来源与摘要见 `UPSTREAM.json`。同步营地隐私指令、查询选号及段位升降提示修复；实际加载 46 个模块、118 条路由。QQ 官方平台适配、帮助按钮和可选的跨机器人查询登录态复用继续提供。
+本版上游基准提交：[`344c2c6b76c8`](https://gitee.com/longhengmu/GloryOfKings-Plugin/commit/344c2c6b76c8cfa9e8b4c0575f65950b916cccde)（2026-10-19），278 份上游文件的来源与摘要见 `UPSTREAM.json`。同步作者的普通令牌共享全库排名修复；实际加载 48 个模块、126 条路由。QQ 官方平台适配、帮助按钮和可选的跨机器人查询登录态复用继续提供。
 
 > 观战直播、营地消息及共享库的客户端已接入。它们所需的服务端由上游作者单独分发，不包含在公开仓库中，需自行取得服务地址和接入令牌。本包没有伪造接口或附送私人密钥。营地游戏数据查询需要有效登录态，并受接口权限、隐私设置及频控影响；官网公告查询无需营地登录。
 
